@@ -1,0 +1,633 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] base: Haiku process, system, thread, path and debugger support
+
+Applies after the FreeBSD 156.0.8078.79 patches and tools/haikuify.py.
+---
+diff --git a/base/BUILD.gn b/base/BUILD.gn
+index d797bea3a9..a4212468a5 100644
+--- a/base/BUILD.gn
++++ b/base/BUILD.gn
+@@ -2297,6 +2297,13 @@ component("base") {
+       "process/process_metrics_freebsd.cc",
+       "system/sys_info_freebsd.cc",
+     ]
++  } else if (is_haiku) {
++    sources += [
++      "process/process_handle_haiku.cc",
++      "process/process_iterator_haiku.cc",
++      "process/process_metrics_haiku.cc",
++      "system/sys_info_haiku.cc",
++    ]
+   }
+ 
+   # iOS
+@@ -2492,6 +2499,34 @@ component("base") {
+     ]
+   }
+ 
++  if (is_haiku) {
++    # Same Linux-only sources the BSD ports drop. Haiku has no inotify or
++    # kqueue; file watching uses the stub until a node-monitor
++    # (watch_node()) based FilePathWatcher is written.
++    sources -= [
++      "files/file_path_watcher_inotify.cc",
++      "files/scoped_file_linux.cc",
++      "process/process_handle_linux.cc",
++      "process/process_iterator_linux.cc",
++      "process/process_linux.cc",
++      "process/process_metrics_linux.cc",
++      "process/set_process_title_linux.cc",
++      "process/set_process_title_linux.h",
++      "profiler/stack_copier_signal.cc",
++      "profiler/stack_copier_signal.h",
++      "profiler/thread_delegate_posix.cc",
++      "profiler/thread_delegate_posix.h",
++      "stack_canary_linux.cc",
++      "stack_canary_linux.h",
++      "system/sys_info_linux.cc",
++      "threading/platform_thread_linux.cc",
++    ]
++    sources += [
++      "files/file_path_watcher_stub.cc",
++      "threading/platform_thread_haiku.cc",
++    ]
++  }
++
+   if (use_blink) {
+     sources += [
+       "files/file_path_watcher.cc",
+diff --git a/base/base_paths_posix.cc b/base/base_paths_posix.cc
+index 5085a2163a..f1d8bcff68 100644
+--- a/base/base_paths_posix.cc
++++ b/base/base_paths_posix.cc
+@@ -29,6 +29,8 @@
+ #if BUILDFLAG(IS_BSD)
+ #include <sys/param.h>
+ #include <sys/sysctl.h>
++#elif BUILDFLAG(IS_HAIKU)
++#include "base/process/process_handle.h"
+ #elif BUILDFLAG(IS_SOLARIS) || BUILDFLAG(IS_AIX)
+ #include <stdlib.h>
+ #endif
+@@ -53,6 +55,13 @@ bool PathProviderPosix(int key, FilePath* result) {
+       }
+       *result = FilePath(bin_dir.value());
+       return true;
++#elif BUILDFLAG(IS_HAIKU)
++      FilePath exe = GetProcessExecutablePath(GetCurrentProcessHandle());
++      if (exe.empty()) {
++        NOTREACHED() << "Unable to resolve executable path.";
++      }
++      *result = exe;
++      return true;
+ #elif BUILDFLAG(IS_SOLARIS)
+       char bin_dir[PATH_MAX + 1];
+       if (realpath(getexecname(), bin_dir) == NULL) {
+diff --git a/base/debug/debugger_posix.cc b/base/debug/debugger_posix.cc
+index 860e11c117..7f6687b861 100644
+--- a/base/debug/debugger_posix.cc
++++ b/base/debug/debugger_posix.cc
+@@ -43,6 +43,10 @@
+ #include <sys/proc.h>
+ #endif
+ 
++#if BUILDFLAG(IS_HAIKU)
++#include <OS.h>
++#endif
++
+ #if BUILDFLAG(IS_FREEBSD)
+ #include <sys/user.h>
+ #endif
+@@ -266,6 +270,20 @@ void VerifyDebugger() {
+ #endif
+ }
+ 
++#elif BUILDFLAG(IS_HAIKU)
++
++bool BeingDebugged() {
++  // A team that has a debugger attached has a debugger nub thread.
++  // get_team_info() is a syscall; no heap or stdio, so this is signal safe.
++  team_info info;
++  if (get_team_info(B_CURRENT_TEAM, &info) != B_OK) {
++    return false;
++  }
++  return info.debugger_nub_thread >= 0;
++}
++
++void VerifyDebugger() {}
++
+ #else
+ 
+ bool BeingDebugged() {
+diff --git a/base/debug/stack_trace_posix.cc b/base/debug/stack_trace_posix.cc
+index ddc7e46323..8545a334d2 100644
+--- a/base/debug/stack_trace_posix.cc
++++ b/base/debug/stack_trace_posix.cc
+@@ -326,7 +326,8 @@ void PrintToStderr(const char* output) {
+   std::ignore = HANDLE_EINTR(write(STDERR_FILENO, output, strlen(output)));
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || \
++    BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU)
+ void AlarmSignalHandler(int signal, siginfo_t* info, void* void_context) {
+   // We have seen rare cases on AMD linux where the default signal handler
+   // either does not run or a thread (Probably an AMD driver thread) prevents
+@@ -551,7 +552,8 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
+     _exit(EXIT_FAILURE);
+   }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || \
++    BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU)
+   // Set an alarm to trigger in case the default handler does not terminate
+   // the process. See 'AlarmSignalHandler' for more details.
+   struct sigaction action;
+diff --git a/base/process/process_handle_haiku.cc b/base/process/process_handle_haiku.cc
+new file mode 100644
+index 0000000000..6184a44213
+--- /dev/null
++++ b/base/process/process_handle_haiku.cc
+@@ -0,0 +1,47 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/process/process_handle.h"
++
++#include <OS.h>
++#include <image.h>
++#include <sys/types.h>
++#include <unistd.h>
++
++#include "base/files/file_path.h"
++
++// Private libroot syscall wrapper (headers/private/system/syscalls.h). The
++// public API has no way to query another team's parent; this is the same call
++// the old Haiku QtWebEngine port used.
++extern "C" pid_t _kern_process_info(pid_t process, int32 which);
++
++namespace base {
++
++namespace {
++// From headers/private/kernel/thread_defs.h.
++constexpr int32 kParentId = 3;
++}  // namespace
++
++ProcessId GetParentProcessId(ProcessHandle process) {
++  if (process == GetCurrentProcessHandle()) {
++    return getppid();
++  }
++  pid_t parent = _kern_process_info(process, kParentId);
++  return parent < 0 ? -1 : parent;
++}
++
++FilePath GetProcessExecutablePath(ProcessHandle process) {
++  // A team's first B_APP_IMAGE is its executable; image_info::name holds the
++  // absolute path it was loaded from.
++  image_info info;
++  int32 cookie = 0;
++  while (get_next_image_info(process, &cookie, &info) == B_OK) {
++    if (info.type == B_APP_IMAGE) {
++      return FilePath(info.name);
++    }
++  }
++  return FilePath();
++}
++
++}  // namespace base
+diff --git a/base/process/process_iterator.h b/base/process/process_iterator.h
+index f777ddc2db..9eef901155 100644
+--- a/base/process/process_iterator.h
++++ b/base/process/process_iterator.h
+@@ -115,6 +115,9 @@ class BASE_EXPORT ProcessIterator {
+ #elif BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
+   std::vector<kinfo_proc> kinfo_procs_;
+   size_t index_of_kinfo_proc_ = 0;
++#elif BUILDFLAG(IS_HAIKU)
++  // Cookie for get_next_team_info().
++  int32_t team_cookie_ = 0;
+ #elif BUILDFLAG(IS_POSIX)
+   struct DIRClose {
+     inline void operator()(DIR* x) const {
+diff --git a/base/process/process_iterator_haiku.cc b/base/process/process_iterator_haiku.cc
+new file mode 100644
+index 0000000000..038ac7fbda
+--- /dev/null
++++ b/base/process/process_iterator_haiku.cc
+@@ -0,0 +1,63 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/process/process_iterator.h"
++
++#include <OS.h>
++#include <image.h>
++#include <stddef.h>
++#include <string.h>
++#include <unistd.h>
++
++#include <string>
++
++#include "base/files/file_path.h"
++#include "base/process/process_handle.h"
++#include "base/strings/string_split.h"
++
++namespace base {
++
++ProcessIterator::ProcessIterator(const ProcessFilter* filter)
++    : filter_(filter) {}
++
++ProcessIterator::~ProcessIterator() = default;
++
++bool ProcessIterator::CheckForNextProcess() {
++  team_info info;
++  while (get_next_team_info(&team_cookie_, &info) == B_OK) {
++    // The kernel team has no executable image; skip it like the Linux
++    // iterator skips kernel threads.
++    if (info.team == B_SYSTEM_TEAM) {
++      continue;
++    }
++
++    FilePath exe = GetProcessExecutablePath(info.team);
++    if (exe.empty()) {
++      continue;
++    }
++
++    entry_.pid_ = info.team;
++    entry_.ppid_ = GetParentProcessId(info.team);
++    pid_t pgid = getpgid(info.team);
++    entry_.gid_ = pgid < 0 ? 0 : pgid;
++    entry_.exe_file_ = exe.BaseName().value();
++
++    // team_info::args holds the space-separated command line, truncated to
++    // sizeof(args) bytes. That is the best the public API offers.
++    std::string args(info.args, strnlen(info.args, sizeof(info.args)));
++    entry_.cmd_line_args_ =
++        SplitString(args, " ", KEEP_WHITESPACE, SPLIT_WANT_NONEMPTY);
++    return true;
++  }
++  return false;
++}
++
++bool NamedProcessIterator::IncludeEntry() {
++  if (executable_name_ != entry().exe_file()) {
++    return false;
++  }
++  return ProcessIterator::IncludeEntry();
++}
++
++}  // namespace base
+diff --git a/base/process/process_metrics_haiku.cc b/base/process/process_metrics_haiku.cc
+new file mode 100644
+index 0000000000..20f64647ef
+--- /dev/null
++++ b/base/process/process_metrics_haiku.cc
+@@ -0,0 +1,170 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/process/process_metrics.h"
++
++#include <OS.h>
++#include <fcntl.h>
++#include <stddef.h>
++#include <sys/resource.h>
++#include <sys/types.h>
++#include <unistd.h>
++
++#include <algorithm>
++
++#include "base/memory/ptr_util.h"
++#include "base/notimplemented.h"
++#include "base/process/process_handle.h"
++#include "base/values.h"
++
++namespace base {
++
++namespace {
++
++bool GetHaikuSystemInfo(system_info* info) {
++  return get_system_info(info) == B_OK;
++}
++
++}  // namespace
++
++ProcessMetrics::ProcessMetrics(ProcessHandle process) : process_(process) {}
++
++// static
++std::unique_ptr<ProcessMetrics> ProcessMetrics::CreateProcessMetrics(
++    ProcessHandle process) {
++  return WrapUnique(new ProcessMetrics(process));
++}
++
++base::expected<ProcessMemoryInfo, ProcessUsageError>
++ProcessMetrics::GetMemoryInfo() const {
++  team_info team;
++  if (get_team_info(process_, &team) != B_OK) {
++    return base::unexpected(ProcessUsageError::kProcessNotFound);
++  }
++
++  // Resident set = pages of the team's areas that are currently in RAM.
++  uint64_t resident = 0;
++  area_info area;
++  ssize_t cookie = 0;
++  while (get_next_area_info(process_, &cookie, &area) == B_OK) {
++    resident += area.ram_size;
++  }
++
++  ProcessMemoryInfo memory_info;
++  memory_info.resident_set_bytes = resident;
++  return memory_info;
++}
++
++base::expected<TimeDelta, ProcessCPUUsageError>
++ProcessMetrics::GetCumulativeCPUUsage() {
++  team_usage_info usage;
++  if (get_team_usage_info(process_, B_TEAM_USAGE_SELF, &usage) != B_OK) {
++    return base::unexpected(ProcessCPUUsageError::kProcessNotFound);
++  }
++  // bigtime_t is in microseconds.
++  return base::ok(Microseconds(usage.user_time + usage.kernel_time));
++}
++
++size_t GetSystemCommitCharge() {
++  system_info info;
++  if (!GetHaikuSystemInfo(&info)) {
++    return 0;
++  }
++  // In KiB, as documented in process_metrics.h.
++  return static_cast<size_t>(info.used_pages) * (B_PAGE_SIZE / 1024);
++}
++
++int64_t GetNumberOfThreads(ProcessHandle process) {
++  team_info team;
++  if (get_team_info(process, &team) != B_OK) {
++    return 0;
++  }
++  return team.thread_count;
++}
++
++bool GetSystemMemoryInfo(SystemMemoryInfo* meminfo) {
++  system_info info;
++  if (!GetHaikuSystemInfo(&info)) {
++    return false;
++  }
++  const uint64_t page = B_PAGE_SIZE;
++  const uint64_t total = static_cast<uint64_t>(info.max_pages) * page;
++  const uint64_t used = static_cast<uint64_t>(info.used_pages) * page;
++  const uint64_t cached =
++      (static_cast<uint64_t>(info.cached_pages) + info.block_cache_pages) *
++      page;
++  meminfo->total = ByteSize(total);
++  meminfo->free = ByteSize(total > used ? total - used : 0);
++  meminfo->available =
++      ByteSize(std::min<uint64_t>(total, (total > used ? total - used : 0) +
++                                             cached));
++  meminfo->cached = ByteSize(cached);
++  meminfo->swap_total =
++      ByteSize(static_cast<uint64_t>(info.max_swap_pages) * page);
++  meminfo->swap_free =
++      ByteSize(static_cast<uint64_t>(info.free_swap_pages) * page);
++  return true;
++}
++
++int ProcessMetrics::GetOpenFdCount() const {
++  // There is no public API to enumerate another team's descriptors.
++  if (process_ != GetCurrentProcessHandle()) {
++    return -1;
++  }
++  int count = 0;
++  const int max_fd = getdtablesize();
++  for (int fd = 0; fd < max_fd; ++fd) {
++    if (fcntl(fd, F_GETFD) != -1) {
++      ++count;
++    }
++  }
++  return count;
++}
++
++int ProcessMetrics::GetOpenFdSoftLimit() const {
++  if (process_ != GetCurrentProcessHandle()) {
++    return -1;
++  }
++  struct rlimit limit;
++  if (getrlimit(RLIMIT_NOFILE, &limit) != 0) {
++    return -1;
++  }
++  return limit.rlim_cur == RLIM_INFINITY ? -1
++                                         : static_cast<int>(limit.rlim_cur);
++}
++
++int ProcessMetrics::GetIdleWakeupsPerSecond() {
++  NOTIMPLEMENTED();
++  return 0;
++}
++
++bool GetSystemDiskInfo(SystemDiskInfo* diskinfo) {
++  NOTIMPLEMENTED();
++  return false;
++}
++
++bool GetVmStatInfo(VmStatInfo* vmstat) {
++  NOTIMPLEMENTED();
++  return false;
++}
++
++SystemDiskInfo::SystemDiskInfo() {
++  reads = 0;
++  reads_merged = 0;
++  sectors_read = 0;
++  read_time = 0;
++  writes = 0;
++  writes_merged = 0;
++  sectors_written = 0;
++  write_time = 0;
++  io = 0;
++  io_time = 0;
++  weighted_io_time = 0;
++}
++
++SystemDiskInfo::SystemDiskInfo(const SystemDiskInfo& other) = default;
++
++SystemDiskInfo& SystemDiskInfo::operator=(const SystemDiskInfo&) = default;
++
++}  // namespace base
+diff --git a/base/system/sys_info_haiku.cc b/base/system/sys_info_haiku.cc
+new file mode 100644
+index 0000000000..82065906f1
+--- /dev/null
++++ b/base/system/sys_info_haiku.cc
+@@ -0,0 +1,89 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/system/sys_info.h"
++
++#include <OS.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <unistd.h>
++
++#include <algorithm>
++#include <string>
++
++#include "base/byte_size.h"
++#include "base/check.h"
++#include "base/cpu.h"
++#include "base/numerics/safe_conversions.h"
++#include "base/strings/string_util.h"
++
++namespace base {
++
++namespace {
++
++bool GetSystemInfo(system_info* info) {
++  return get_system_info(info) == B_OK;
++}
++
++}  // namespace
++
++// static
++int SysInfo::NumberOfProcessors() {
++  system_info info;
++  if (!GetSystemInfo(&info) || info.cpu_count == 0) {
++    return 1;
++  }
++  return static_cast<int>(info.cpu_count);
++}
++
++// static
++ByteSize SysInfo::AmountOfTotalPhysicalMemoryImpl() {
++  system_info info;
++  if (!GetSystemInfo(&info)) {
++    return ByteSize(0);
++  }
++  return ByteSize(static_cast<uint64_t>(info.max_pages) * B_PAGE_SIZE);
++}
++
++// static
++ByteSize SysInfo::AmountOfAvailablePhysicalMemoryImpl() {
++  system_info info;
++  if (!GetSystemInfo(&info)) {
++    return ByteSize(0);
++  }
++  // Cached and block-cache pages are counted in used_pages but are reclaimed
++  // on demand, so treat them as available like Linux's MemAvailable does.
++  uint64_t free_pages = static_cast<uint64_t>(info.max_pages) - info.used_pages;
++  free_pages += info.cached_pages + info.block_cache_pages;
++  free_pages = std::min<uint64_t>(free_pages, info.max_pages);
++  return ByteSize(free_pages * B_PAGE_SIZE);
++}
++
++// static
++std::string SysInfo::CPUModelName() {
++#if defined(ARCH_CPU_X86_FAMILY)
++  return std::string(TrimWhitespaceASCII(CPU().cpu_brand(), TRIM_ALL));
++#else
++  return std::string();
++#endif
++}
++
++// static
++uint64_t SysInfo::MaxSharedMemorySize() {
++  // Haiku has no SysV shmmax-style limit for the areas backing shared memory;
++  // physical memory is the effective bound.
++  return AmountOfTotalPhysicalMemoryImpl().InBytes();
++}
++
++// static
++SysInfo::HardwareInfo SysInfo::GetHardwareInfoSync() {
++  HardwareInfo info;
++  info.manufacturer = "Haiku";
++  info.model = HardwareModelName();
++  DCHECK(IsStringUTF8(info.manufacturer));
++  DCHECK(IsStringUTF8(info.model));
++  return info;
++}
++
++}  // namespace base
+diff --git a/base/threading/platform_thread_haiku.cc b/base/threading/platform_thread_haiku.cc
+new file mode 100644
+index 0000000000..2033afe954
+--- /dev/null
++++ b/base/threading/platform_thread_haiku.cc
+@@ -0,0 +1,49 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <OS.h>
++
++#include <string>
++
++#include "base/notimplemented.h"
++#include "base/threading/platform_thread.h"
++
++namespace base {
++namespace internal {
++
++// Thread priorities are left at Haiku's defaults for the initial port, like
++// the BSD ports do. Haiku's scheduler priorities (B_LOW_PRIORITY ...
++// B_REAL_TIME_PRIORITY via set_thread_priority()) are a good follow-up for
++// kBackground and kRealtimeAudio.
++void SetCurrentThreadTypeImpl(ThreadType thread_type,
++                              MessagePumpType pump_type_hint) {
++  NOTIMPLEMENTED_LOG_ONCE();
++}
++
++bool CanSetThreadTypeToRealtimeAudio() {
++  return false;
++}
++
++PlatformPriorityOverride SetThreadTypeOverride(
++    PlatformThreadHandle thread_handle,
++    ThreadType thread_type) {
++  return false;
++}
++
++void RemoveThreadTypeOverride(
++    PlatformThreadHandle thread_handle,
++    const PlatformPriorityOverride& priority_override_handle,
++    ThreadType initial_thread_type) {}
++
++}  // namespace internal
++
++// static
++void PlatformThreadBase::SetName(const std::string& name) {
++  SetNameCommon(name);
++  // Kernel thread names are limited to B_OS_NAME_LENGTH - 1 characters;
++  // rename_thread() truncates.
++  rename_thread(find_thread(nullptr), name.c_str());
++}
++
++}  // namespace base
+diff --git a/base/threading/platform_thread_posix.cc b/base/threading/platform_thread_posix.cc
+index ee6642971e..34e23d9f16 100644
+--- a/base/threading/platform_thread_posix.cc
++++ b/base/threading/platform_thread_posix.cc
+@@ -9,6 +9,10 @@
+ #if BUILDFLAG(IS_BSD)
+ #include <pthread_np.h>
+ #endif
++
++#if BUILDFLAG(IS_HAIKU)
++#include <OS.h>
++#endif
+ #include <sched.h>
+ #include <stddef.h>
+ #include <stdint.h>
+@@ -279,6 +283,10 @@ PlatformThreadId PlatformThreadBase::CurrentId() {
+   return PlatformThreadId(static_cast<uint64_t>(getthrid()));
+ #elif BUILDFLAG(IS_FREEBSD)
+   return PlatformThreadId(static_cast<uint64_t>(pthread_getthreadid_np()));
++#elif BUILDFLAG(IS_HAIKU)
++  // The kernel thread_id, as used by get_thread_info(), rename_thread() and
++  // the Haiku debugger.
++  return PlatformThreadId(static_cast<uint64_t>(find_thread(nullptr)));
+ #elif BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_AIX)
+   return PlatformThreadId(reinterpret_cast<int64_t>(pthread_self()));
+ #endif

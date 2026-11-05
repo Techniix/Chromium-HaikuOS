@@ -1,0 +1,88 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] sandbox,content: share FreeBSD's POSIX sandbox and GPU pre-sandbox hook
+
+Applies after the FreeBSD 156.0.8078.79 patches and tools/haikuify.py.
+---
+diff --git a/content/common/BUILD.gn b/content/common/BUILD.gn
+index 55fc2ca661..3d7fea7bb1 100644
+--- a/content/common/BUILD.gn
++++ b/content/common/BUILD.gn
+@@ -373,7 +373,8 @@ source_set("common") {
+   }
+ 
+   if (is_linux || is_chromeos) {
+-    if (is_bsd) {
++    if (is_bsd || is_haiku) {
++      # Generic dlopen()-based preloading; shared with Haiku.
+       sources += [
+         "gpu_pre_sandbox_hook_bsd.cc",
+         "gpu_pre_sandbox_hook_bsd.h",
+diff --git a/content/utility/utility_main.cc b/content/utility/utility_main.cc
+index 5474a716f9..bcb16e653a 100644
+--- a/content/utility/utility_main.cc
++++ b/content/utility/utility_main.cc
+@@ -45,7 +45,8 @@
+ #include "services/tracing/public/cpp/trace_startup.h"
+ #include "services/video_capture/public/mojom/video_capture_service.mojom.h"
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD) || \
++    BUILDFLAG(IS_HAIKU)
+ #include "base/file_descriptor_store.h"
+ #include "base/files/file_util.h"
+ #include "base/pickle.h"
+@@ -65,7 +66,7 @@
+ #include "services/screen_ai/buildflags/buildflags.h"
+ #include "services/shape_detection/shape_detection_sandbox_hook.h"
+ 
+-#if BUILDFLAG(IS_BSD)
++#if BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU)
+ #include "sandbox/policy/sandbox.h"
+ #include "content/common/gpu_pre_sandbox_hook_bsd.h"
+ #endif
+diff --git a/sandbox/policy/BUILD.gn b/sandbox/policy/BUILD.gn
+index f13bef09c0..afadb64912 100644
+--- a/sandbox/policy/BUILD.gn
++++ b/sandbox/policy/BUILD.gn
+@@ -131,19 +131,24 @@ component("policy") {
+     ]
+     libs = [ "util" ]
+   }
+-  if (is_freebsd) {
++  if (is_freebsd || is_haiku) {
++    # FreeBSD's SandboxLinux is plain POSIX (no kernel sandbox, optional
++    # RLIMIT_DATA cap), so Haiku shares it. Haiku runs with --no-sandbox.
+     sources += [
+       "freebsd/sandbox_freebsd.cc",
+       "freebsd/sandbox_freebsd.h",
+     ]
+   }
+-  if ((is_bsd || is_haiku)) {
++  if (is_bsd || is_haiku) {
+     deps += [
+       "//sandbox:sandbox_buildflags",
+       "//skia",
+-      "//ui/gfx/x",
+     ]
+   }
++  if ((is_bsd || is_haiku)) {
++    # Haiku has no X11.
++    deps += [ "//ui/gfx/x" ]
++  }
+   if (is_chromeos) {
+     sources += [
+       "linux/bpf_ime_policy_linux.cc",
+diff --git a/sandbox/policy/sandbox.h b/sandbox/policy/sandbox.h
+index 60581c4d1d..1666c2cbc0 100644
+--- a/sandbox/policy/sandbox.h
++++ b/sandbox/policy/sandbox.h
+@@ -14,7 +14,8 @@
+ 
+ #if BUILDFLAG(IS_OPENBSD)
+ #include "sandbox/policy/openbsd/sandbox_openbsd.h"
+-#elif BUILDFLAG(IS_FREEBSD)
++#elif BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_HAIKU)
++// Haiku shares FreeBSD's POSIX-only SandboxLinux implementation.
+ #include "sandbox/policy/freebsd/sandbox_freebsd.h"
+ #endif
+ 

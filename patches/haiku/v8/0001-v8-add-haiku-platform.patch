@@ -1,0 +1,199 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] v8: add Haiku platform support
+
+Applies to v8/ after the FreeBSD v8 patches and tools/haikuify.py.
+---
+diff --git a/v8/BUILD.gn b/v8/BUILD.gn
+index 5dd8e92..044011e 100644
+--- a/v8/BUILD.gn
++++ b/v8/BUILD.gn
+@@ -7672,6 +7672,12 @@ v8_component("v8_libbase") {
+       "dl",
+       "rt",
+     ]
++  } else if (is_haiku) {
++    # libroot provides libc, libm, libdl and pthreads implicitly.
++    sources += [
++      "src/base/debug/stack_trace_posix.cc",
++      "src/base/platform/platform-haiku.cc",
++    ]
+   } else if (is_openbsd) {
+     sources += [
+       "src/base/debug/stack_trace_posix.cc",
+diff --git a/v8/include/v8config.h b/v8/include/v8config.h
+index 1a6ed02..9425b9c 100644
+--- a/v8/include/v8config.h
++++ b/v8/include/v8config.h
+@@ -81,6 +81,7 @@ path. Add it with -I<path> to the command line
+ //  V8_OS_DRAGONFLYBSD  - DragonFlyBSD
+ //  V8_OS_FREEBSD       - FreeBSD
+ //  V8_OS_FUCHSIA       - Fuchsia
++//  V8_OS_HAIKU         - Haiku
+ //  V8_OS_LINUX         - Linux (Android, ChromeOS, Linux, ...)
+ //  V8_OS_DARWIN        - Darwin (macOS, iOS)
+ //  V8_OS_MACOS         - macOS
+@@ -170,6 +171,11 @@ path. Add it with -I<path> to the command line
+ # define V8_OS_POSIX 1
+ # define V8_OS_STRING "openbsd"
+ 
++#elif defined(__HAIKU__)
++# define V8_OS_HAIKU 1
++# define V8_OS_POSIX 1
++# define V8_OS_STRING "haiku"
++
+ #elif defined(__QNXNTO__)
+ # define V8_OS_POSIX 1
+ # define V8_OS_QNX 1
+diff --git a/v8/src/base/platform/platform-haiku.cc b/v8/src/base/platform/platform-haiku.cc
+new file mode 100644
+index 0000000..957fa64
+--- /dev/null
++++ b/v8/src/base/platform/platform-haiku.cc
+@@ -0,0 +1,69 @@
++// Copyright 2026 the V8 project authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Platform-specific code for Haiku goes here. For the POSIX-compatible
++// parts, the implementation is in platform-posix.cc.
++
++#include <OS.h>
++#include <image.h>
++#include <pthread.h>
++#include <string.h>
++#include <sys/mman.h>
++#include <unistd.h>
++
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "src/base/macros.h"
++#include "src/base/platform/platform-posix-time.h"
++#include "src/base/platform/platform-posix.h"
++#include "src/base/platform/platform.h"
++
++namespace v8 {
++namespace base {
++
++TimezoneCache* OS::CreateTimezoneCache() {
++  return new PosixDefaultTimezoneCache();
++}
++
++std::vector<OS::SharedLibraryAddress> OS::GetSharedLibraryAddresses() {
++  // Every loaded image (the app, libroot, add-ons, ...) reports its text
++  // segment through get_next_image_info().
++  std::vector<SharedLibraryAddress> result;
++  image_info info;
++  int32 cookie = 0;
++  while (get_next_image_info(B_CURRENT_TEAM, &cookie, &info) == B_OK) {
++    const char* path = info.name;
++    const char* slash = strrchr(path, '/');
++    std::string lib_name(slash != nullptr ? slash + 1 : path);
++    uintptr_t start = reinterpret_cast<uintptr_t>(info.text);
++    uintptr_t end = start + static_cast<uintptr_t>(info.text_size);
++    result.push_back(SharedLibraryAddress(lib_name, start, end));
++  }
++  return result;
++}
++
++void OS::SignalCodeMovingGC() {}
++
++void OS::AdjustSchedulingParams() {}
++
++std::optional<OS::MemoryRange> OS::GetFirstFreeMemoryRangeWithin(
++    OS::Address boundary_start, OS::Address boundary_end, size_t minimum_size,
++    size_t alignment) {
++  return std::nullopt;
++}
++
++// static
++Stack::StackSlot Stack::ObtainCurrentThreadStackStart() {
++  // Stacks grow down; the "start" V8 wants is the highest address.
++  thread_info info;
++  if (get_thread_info(find_thread(nullptr), &info) != B_OK) {
++    return nullptr;
++  }
++  return info.stack_end;
++}
++
++}  // namespace base
++}  // namespace v8
+diff --git a/v8/src/base/platform/platform-posix.cc b/v8/src/base/platform/platform-posix.cc
+index 54d2a32..dbe2dd2 100644
+--- a/v8/src/base/platform/platform-posix.cc
++++ b/v8/src/base/platform/platform-posix.cc
+@@ -74,10 +74,14 @@
+ #include <sys/resource.h>
+ #endif
+ 
+-#if !defined(_AIX) && !defined(V8_OS_FUCHSIA) && !V8_OS_ZOS
++#if !defined(_AIX) && !defined(V8_OS_FUCHSIA) && !V8_OS_ZOS && !V8_OS_HAIKU
+ #include <sys/syscall.h>
+ #endif
+ 
++#if V8_OS_HAIKU
++#include <OS.h>  // find_thread, rename_thread
++#endif
++
+ #if V8_OS_FREEBSD || V8_OS_DARWIN || V8_OS_BSD || V8_OS_SOLARIS
+ #define MAP_ANONYMOUS MAP_ANON
+ #endif
+@@ -141,9 +145,9 @@ int GetFlagsForMemoryPermission(OS::MemoryPermission access, PageType page_type,
+   flags |= (page_type == PageType::kShared) ? MAP_SHARED : MAP_PRIVATE;
+   if (access == OS::MemoryPermission::kNoAccess ||
+       access == OS::MemoryPermission::kNoAccessWillJitLater) {
+-#if !V8_OS_AIX && !V8_OS_FREEBSD && !V8_OS_QNX
++#if !V8_OS_AIX && !V8_OS_FREEBSD && !V8_OS_QNX && !V8_OS_HAIKU
+     flags |= MAP_NORESERVE;
+-#endif  // !V8_OS_AIX && !V8_OS_FREEBSD && !V8_OS_QNX
++#endif  // !V8_OS_AIX && !V8_OS_FREEBSD && !V8_OS_QNX && !V8_OS_HAIKU
+ #if V8_OS_QNX
+     flags |= MAP_LAZY;
+ #endif  // V8_OS_QNX
+@@ -939,6 +943,8 @@ int OS::GetCurrentThreadIdInternal() {
+   return static_cast<int>(pthread_self());
+ #elif V8_OS_ZOS
+   return __tcbtid();
++#elif V8_OS_HAIKU
++  return static_cast<int>(find_thread(nullptr));
+ #else
+   return static_cast<int>(reinterpret_cast<intptr_t>(pthread_self()));
+ #endif
+@@ -1250,6 +1256,9 @@ Thread::~Thread() {
+ static void SetThreadName(const char* name) {
+ #if V8_OS_DRAGONFLYBSD || V8_OS_FREEBSD || V8_OS_OPENBSD
+   pthread_set_name_np(pthread_self(), name);
++#elif V8_OS_HAIKU
++  // Kernel thread names are truncated to B_OS_NAME_LENGTH - 1 characters.
++  rename_thread(find_thread(nullptr), name);
+ #elif V8_OS_NETBSD
+   static_assert(Thread::kMaxThreadNameLength <= PTHREAD_MAX_NAMELEN_NP);
+   pthread_setname_np(pthread_self(), "%s", name);
+@@ -1431,7 +1440,7 @@ void Thread::SetThreadLocal(LocalStorageKey key, void* value) {
+ // keep this version in POSIX as most Linux-compatible derivatives will
+ // support it. MacOS and FreeBSD are different here.
+ #if !defined(V8_OS_FREEBSD) && !defined(V8_OS_DARWIN) && !defined(_AIX) && \
+-    !defined(V8_OS_SOLARIS) && !defined(V8_OS_OPENBSD)
++    !defined(V8_OS_SOLARIS) && !defined(V8_OS_OPENBSD) && !defined(V8_OS_HAIKU)
+ 
+ namespace {
+ #if DEBUG
+diff --git a/v8/src/libsampler/sampler.cc b/v8/src/libsampler/sampler.cc
+index 323ef71..a8a0f38 100644
+--- a/v8/src/libsampler/sampler.cc
++++ b/v8/src/libsampler/sampler.cc
+@@ -540,6 +540,13 @@ void SignalHandler::FillRegisterState(void* context, RegisterState* state) {
+   state->fp = reinterpret_cast<void*>(mcontext.mc_gpregs.gp_x[29]);
+ #endif  // __CHERI_PURE_CAPABILITY__
+ #endif  // V8_HOST_ARCH_*
++#elif V8_OS_HAIKU
++#if V8_HOST_ARCH_X64
++  // Haiku's x86_64 mcontext_t is struct vregs (headers/posix/arch/x86_64).
++  state->pc = reinterpret_cast<void*>(mcontext.rip);
++  state->sp = reinterpret_cast<void*>(mcontext.rsp);
++  state->fp = reinterpret_cast<void*>(mcontext.rbp);
++#endif  // V8_HOST_ARCH_X64
+ #elif V8_OS_NETBSD
+ #if V8_HOST_ARCH_IA32
+   state->pc = reinterpret_cast<void*>(mcontext.__gregs[_REG_EIP]);

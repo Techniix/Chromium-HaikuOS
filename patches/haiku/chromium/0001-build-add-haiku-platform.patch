@@ -1,0 +1,323 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] build: add the Haiku platform (build flags, toolchain, Ozone/Wayland defaults)
+
+Applies after the FreeBSD 156.0.8078.79 patches and tools/haikuify.py.
+---
+diff --git a/base/allocator/partition_allocator/src/partition_alloc/build_config.h b/base/allocator/partition_allocator/src/partition_alloc/build_config.h
+index a124902743..008b0e974c 100644
+--- a/base/allocator/partition_allocator/src/partition_alloc/build_config.h
++++ b/base/allocator/partition_allocator/src/partition_alloc/build_config.h
+@@ -18,7 +18,7 @@
+ //
+ // Operating system:
+ //   IS_IOS / IS_AIX / IS_ASMJS / IS_FREEBSD / IS_FUCHSIA / IS_LINUX / IS_MAC /
+-//   IS_NETBSD / IS_OPENBSD / IS_QNX / IS_SOLARIS / IS_WIN
++//   IS_HAIKU / IS_NETBSD / IS_OPENBSD / IS_QNX / IS_SOLARIS / IS_WIN
+ //
+ // Operating system family:
+ //   IS_APPLE / IS_BSD / IS_POSIX
+@@ -104,6 +104,8 @@
+ #define PA_IS_AIX
+ #elif defined(__asmjs__) || defined(__wasm__)
+ #define PA_IS_ASMJS
++#elif defined(__HAIKU__)
++#define PA_IS_HAIKU
+ #endif
+ 
+ // NOTE: Adding a new port? Please follow
+@@ -120,7 +122,7 @@
+ #if defined(PA_IS_AIX) || defined(PA_IS_ASMJS) || defined(PA_IS_FREEBSD) ||  \
+     defined(PA_IS_IOS) || defined(PA_IS_LINUX) || defined(PA_IS_CHROMEOS) || \
+     defined(PA_IS_MAC) || defined(PA_IS_NETBSD) || defined(PA_IS_OPENBSD) || \
+-    defined(PA_IS_QNX) || defined(PA_IS_SOLARIS) ||                          \
++    defined(PA_IS_QNX) || defined(PA_IS_SOLARIS) || defined(PA_IS_HAIKU) ||  \
+     PA_BUILDFLAG(IS_ANDROID) || PA_BUILDFLAG(IS_CHROMEOS)
+ #define PA_IS_POSIX
+ #endif
+@@ -426,6 +428,13 @@
+ #endif
+ #undef PA_IS_FUCHSIA
+ 
++#if defined(PA_IS_HAIKU)
++#define PA_BUILDFLAG_INTERNAL_IS_HAIKU() (1)
++#else
++#define PA_BUILDFLAG_INTERNAL_IS_HAIKU() (0)
++#endif
++#undef PA_IS_HAIKU
++
+ #if defined(PA_IS_IOS)
+ #define PA_BUILDFLAG_INTERNAL_IS_IOS() (1)
+ #else
+diff --git a/build/build_config.h b/build/build_config.h
+index 0e3bcb4558..f17ccdada4 100644
+--- a/build/build_config.h
++++ b/build/build_config.h
+@@ -17,12 +17,13 @@
+ //  Operating System:
+ //    IS_AIX / IS_ANDROID / IS_ASMJS / IS_CHROMEOS / IS_FREEBSD / IS_FUCHSIA /
+ //    IS_IOS / IS_IOS_MACCATALYST / IS_IOS_TVOS / IS_LINUX / IS_MAC /
+-//    IS_NETBSD / IS_OPENBSD / IS_QNX / IS_SOLARIS / IS_WATCHOS / IS_WIN
++//    IS_HAIKU / IS_NETBSD / IS_OPENBSD / IS_QNX / IS_SOLARIS / IS_WATCHOS /
++//    IS_WIN
+ //  Operating System family:
+ //    IS_APPLE: IOS or MAC or IOS_MACCATALYST or IOS_TVOS or WATCHOS
+ //    IS_BSD: FREEBSD or NETBSD or OPENBSD
+ //    IS_POSIX: AIX or ANDROID or ASMJS or CHROMEOS or FREEBSD or IOS or LINUX
+-//              or MAC or NETBSD or OPENBSD or QNX or SOLARIS
++//              or MAC or NETBSD or OPENBSD or QNX or SOLARIS or HAIKU
+ 
+ // This file also adds defines specific to the platform, architecture etc.
+ //
+@@ -120,6 +121,10 @@
+ #define OS_ASMJS 1
+ #elif defined(__MVS__)
+ #define OS_ZOS 1
++#elif defined(__HAIKU__)
++// Haiku is built as a desktop-Linux-like target in GN (is_linux and is_haiku),
++// but, like the BSDs, it does not define OS_LINUX for C++ code.
++#define OS_HAIKU 1
+ #else
+ #error Please add support for your platform in build/build_config.h
+ #endif
+@@ -142,7 +147,7 @@
+     defined(OS_FREEBSD) || defined(OS_IOS) || defined(OS_LINUX) ||   \
+     defined(OS_CHROMEOS) || defined(OS_MAC) || defined(OS_NETBSD) || \
+     defined(OS_OPENBSD) || defined(OS_QNX) || defined(OS_SOLARIS) || \
+-    defined(OS_ZOS)
++    defined(OS_ZOS) || defined(OS_HAIKU)
+ #define OS_POSIX 1
+ #endif
+ 
+@@ -195,6 +200,12 @@
+ #define BUILDFLAG_INTERNAL_IS_FUCHSIA() (0)
+ #endif
+ 
++#if defined(OS_HAIKU)
++#define BUILDFLAG_INTERNAL_IS_HAIKU() (1)
++#else
++#define BUILDFLAG_INTERNAL_IS_HAIKU() (0)
++#endif
++
+ #if defined(OS_IOS)
+ #define BUILDFLAG_INTERNAL_IS_IOS() (1)
+ #else
+diff --git a/build/config/BUILD.gn b/build/config/BUILD.gn
+index fe61f3f7fa..c99f1bb819 100644
+--- a/build/config/BUILD.gn
++++ b/build/config/BUILD.gn
+@@ -207,6 +207,10 @@ config("default_libs") {
+     # Targets should choose to explicitly link frameworks they require. Since
+     # linking can have run-time side effects, nothing should be listed here.
+     libs = []
++  } else if (is_haiku) {
++    # pthreads, libm and libdl all live in libroot, which is linked implicitly.
++    # BSD-style sockets and the resolver live in libnetwork.
++    libs = [ "network" ]
+   } else if ((is_bsd || is_haiku)) {
+     libs = [
+       "pthread",
+diff --git a/build/config/BUILDCONFIG.gn b/build/config/BUILDCONFIG.gn
+index 939727e128..c1a596370d 100644
+--- a/build/config/BUILDCONFIG.gn
++++ b/build/config/BUILDCONFIG.gn
+@@ -258,6 +258,8 @@ if (host_toolchain == "") {
+     host_toolchain = "//build/toolchain/openbsd:clang_$host_cpu"
+   } else if (host_os == "freebsd") {
+     host_toolchain = "//build/toolchain/freebsd:clang_$host_cpu"
++  } else if (host_os == "haiku") {
++    host_toolchain = "//build/toolchain/haiku:clang_$host_cpu"
+   } else {
+     assert(false, "Unsupported host_os: $host_os")
+   }
+@@ -310,6 +312,10 @@ if (target_os == "android") {
+       "emscripten is not a supported target_os. It is available only as secondary toolchain.")
+ } else if (target_os == "openbsd" || target_os == "freebsd") {
+   _default_toolchain = host_toolchain
++} else if (target_os == "haiku") {
++  # Haiku is only supported as a native build (host == target).
++  assert(host_os == "haiku", "Haiku builds are only supported on Haiku hosts.")
++  _default_toolchain = host_toolchain
+ } else {
+   assert(false, "Unsupported target_os: $target_os")
+ }
+@@ -344,8 +350,11 @@ is_android = current_os == "android"
+ is_chromeos = current_os == "chromeos"
+ is_fuchsia = current_os == "fuchsia"
+ is_ios = current_os == "ios"
++# Haiku, like the BSDs, reuses the desktop-Linux code paths in GN; C++ code
++# sees BUILDFLAG(IS_HAIKU) instead of BUILDFLAG(IS_LINUX).
+ is_linux = current_os == "linux" || current_os == "openbsd" ||
+-           current_os == "freebsd"
++           current_os == "freebsd" || current_os == "haiku"
++is_haiku = current_os == "haiku"
+ is_openbsd = current_os == "openbsd"
+ is_freebsd = current_os == "freebsd"
+ is_bsd = current_os == "openbsd" || current_os == "freebsd"
+diff --git a/build/config/compiler/BUILD.gn b/build/config/compiler/BUILD.gn
+index 63869c701a..39d9b75161 100644
+--- a/build/config/compiler/BUILD.gn
++++ b/build/config/compiler/BUILD.gn
+@@ -351,6 +351,9 @@ config("compiler") {
+     ]
+   } else if (is_linux) {
+     configs += [ "//build/config/linux:compiler" ]
++    if (is_haiku) {
++      configs += [ "//build/config/haiku:compiler" ]
++    }
+   } else if (is_mac) {
+     configs += [ "//build/config/mac:compiler" ]
+   } else if (is_ios) {
+@@ -1777,6 +1780,9 @@ config("runtime_library") {
+     configs += [ "//build/config/win:runtime_library" ]
+   } else if (is_linux || is_chromeos) {
+     configs += [ "//build/config/linux:runtime_library" ]
++    if (is_haiku) {
++      configs += [ "//build/config/haiku:runtime_library" ]
++    }
+     if (is_chromeos) {
+       configs += [ "//build/config/chromeos:runtime_library" ]
+     }
+diff --git a/build/config/haiku/BUILD.gn b/build/config/haiku/BUILD.gn
+new file mode 100644
+index 0000000000..5cb5066e5d
+--- /dev/null
++++ b/build/config/haiku/BUILD.gn
+@@ -0,0 +1,42 @@
++# Copyright 2026 The Chromium Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++# Haiku-specific additions on top of //build/config/linux. Haiku is built as a
++# Linux-like target in GN (is_linux && is_haiku), so the Linux configs apply
++# first and this file only adds what Haiku needs on top.
++
++# Applied to every target through //build/config/compiler:compiler.
++config("compiler") {
++  defines = [
++    # Haiku hides BSD and GNU extensions (e.g. getentropy, strlcpy, memmem,
++    # pipe2) behind these feature macros.
++    "_DEFAULT_SOURCE",
++    "_GNU_SOURCE",
++  ]
++  cflags = [
++    # The Linux configs pass a few flags (e.g. -pthread, -fstack-clash-protection)
++    # that the Haiku Clang driver accepts but ignores; don't let the resulting
++    # warnings break -Werror builds.
++    "-Wno-unused-command-line-argument",
++  ]
++}
++
++# Applied to every target through //build/config/compiler:runtime_library.
++config("runtime_library") {
++  # libroot (libc, libm, pthreads, libdl) is linked implicitly by the Haiku
++  # Clang driver. libnetwork is added in //build/config:default_libs.
++}
++
++# Targets that call the native Haiku C++ API (Application Kit, Interface Kit,
++# Media Kit, ...) add this config.
++config("libbe") {
++  libs = [ "be" ]
++}
++
++config("libmedia") {
++  libs = [
++    "be",
++    "media",
++  ]
++}
+diff --git a/build/config/ozone.gni b/build/config/ozone.gni
+index a18ae6f975..39dd5e9b5b 100644
+--- a/build/config/ozone.gni
++++ b/build/config/ozone.gni
+@@ -90,6 +90,12 @@ declare_args() {
+       ozone_platform = "x11"
+       ozone_platform_wayland = true
+       ozone_platform_x11 = true
++    } else if (is_haiku) {
++      # Haiku has no X server; windows are created through Haiku's in-process
++      # Wayland server (the wayland_server add-on loaded by libwayland-client).
++      ozone_platform = "wayland"
++      ozone_platform_wayland = true
++      ozone_platform_x11 = false
+     } else if (is_fuchsia) {
+       ozone_platform = "flatland"
+       ozone_platform_flatland = true
+diff --git a/build/rust/std/BUILD.gn b/build/rust/std/BUILD.gn
+index ef1cfb1498..8f56562ac8 100644
+--- a/build/rust/std/BUILD.gn
++++ b/build/rust/std/BUILD.gn
+@@ -142,6 +142,9 @@ if (toolchain_has_rust) {
+         "execinfo",
+         "pthread",
+       ]
++    } else if (target_os == "haiku") {
++      # Rust's std uses libnetwork for sockets; libroot is implicit.
++      libs = [ "network" ]
+     } else if (target_os == "netbsd") {
+       libs = [
+         "rt",
+diff --git a/build/toolchain/haiku/BUILD.gn b/build/toolchain/haiku/BUILD.gn
+new file mode 100644
+index 0000000000..ae580ab010
+--- /dev/null
++++ b/build/toolchain/haiku/BUILD.gn
+@@ -0,0 +1,24 @@
++# Copyright 2026 The Chromium Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++import("//build/config/sysroot.gni")
++import("//build/toolchain/gcc_toolchain.gni")
++
++# Haiku is built natively with the system LLVM/Clang from HaikuPorts.
++# Point `clang_base_path` at the prefix that contains bin/clang (the build
++# script detects it, normally "/boot/system").
++
++clang_toolchain("clang_x64") {
++  toolchain_args = {
++    current_cpu = "x64"
++    current_os = "haiku"
++  }
++}
++
++clang_toolchain("clang_arm64") {
++  toolchain_args = {
++    current_cpu = "arm64"
++    current_os = "haiku"
++  }
++}
+diff --git a/third_party/wayland/features.gni b/third_party/wayland/features.gni
+index 6a20f869e7..772853eeb5 100644
+--- a/third_party/wayland/features.gni
++++ b/third_party/wayland/features.gni
+@@ -5,5 +5,9 @@
+ declare_args() {
+   # Controls whether the build should use the version of Wayland
+   # library shipped with the system or Chromium third_party.
+-  use_system_libwayland = false
++  #
++  # Haiku must use the system library: Haiku's libwayland-client is patched to
++  # load the in-process wayland_server add-on instead of connecting to a
++  # compositor socket, and Haiku has no epoll for the bundled event loop.
++  use_system_libwayland = is_haiku
+ }
+diff --git a/ui/webui/webui_features.gni b/ui/webui/webui_features.gni
+index cbf49610a3..78c5b1a309 100644
+--- a/ui/webui/webui_features.gni
++++ b/ui/webui/webui_features.gni
+@@ -46,13 +46,13 @@ if (enable_cast_receiver || is_cast_android || is_castos) {
+     enable_webui_history =
+         target_os == "win" || target_os == "mac" || target_os == "linux" ||
+         target_os == "chromeos" || is_desktop_android || target_os == "openbsd" ||
+-        target_os == "freebsd"
++        target_os == "freebsd" || target_os == "haiku"
+ 
+     # Enable the WebUI version of the New Tab Page.
+     enable_webui_ntp =
+         target_os == "win" || target_os == "mac" || target_os == "linux" ||
+         target_os == "chromeos" || is_desktop_android || target_os == "openbsd" ||
+-        target_os == "freebsd"
++        target_os == "freebsd" || target_os == "haiku"
+   }
+ 
+   declare_args() {

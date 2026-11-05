@@ -1,0 +1,7 @@
+# Downloaded sources and build output (scripts/fetch-sources.sh default)
+/work/
+
+__pycache__/
+*.pyc
+*.orig
+*.rej

@@ -1,0 +1,67 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] services: Haiku OSMetrics for memory instrumentation
+
+Applies after the FreeBSD 156.0.8078.79 patches and tools/haikuify.py.
+---
+diff --git a/services/resource_coordinator/public/cpp/memory_instrumentation/BUILD.gn b/services/resource_coordinator/public/cpp/memory_instrumentation/BUILD.gn
+index dcba8c1f6e..5984cd681a 100644
+--- a/services/resource_coordinator/public/cpp/memory_instrumentation/BUILD.gn
++++ b/services/resource_coordinator/public/cpp/memory_instrumentation/BUILD.gn
+@@ -35,6 +35,10 @@ component("memory_instrumentation") {
+     sources += [ "os_metrics_bsd.cc" ]
+   }
+ 
++  if (is_haiku) {
++    sources += [ "os_metrics_haiku.cc" ]
++  }
++
+   if (is_fuchsia) {
+     sources += [ "os_metrics_fuchsia.cc" ]
+   }
+diff --git a/services/resource_coordinator/public/cpp/memory_instrumentation/os_metrics_haiku.cc b/services/resource_coordinator/public/cpp/memory_instrumentation/os_metrics_haiku.cc
+new file mode 100644
+index 0000000000..2b770471c9
+--- /dev/null
++++ b/services/resource_coordinator/public/cpp/memory_instrumentation/os_metrics_haiku.cc
+@@ -0,0 +1,41 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include <vector>
++
++#include "base/notimplemented.h"
++#include "base/process/process_handle.h"
++#include "base/process/process_metrics.h"
++#include "services/resource_coordinator/public/cpp/memory_instrumentation/os_metrics.h"
++
++namespace memory_instrumentation {
++
++bool OSMetrics::FillOSMemoryDump(base::ProcessHandle handle,
++                                 const MemDumpFlagSet& flags,
++                                 mojom::RawOSMemDump* dump) {
++  const base::ProcessHandle process = handle == base::kNullProcessHandle
++                                          ? base::GetCurrentProcessHandle()
++                                          : handle;
++  // base::ProcessMetrics on Haiku sums the RAM-resident size of the team's
++  // areas (see base/process/process_metrics_haiku.cc).
++  auto metrics = base::ProcessMetrics::CreateProcessMetrics(process);
++  auto info = metrics->GetMemoryInfo();
++  if (!info.has_value()) {
++    return false;
++  }
++  const uint64_t rss = info->resident_set_bytes;
++  dump->resident_set_kb = static_cast<uint32_t>(rss / 1024);
++  dump->platform_private_footprint->rss_anon_bytes = rss;
++  dump->platform_private_footprint->vm_swap_bytes = 0;
++  return true;
++}
++
++std::vector<mojom::VmRegionPtr> OSMetrics::GetProcessMemoryMaps(
++    base::ProcessHandle) {
++  // Could be built from get_next_area_info(); not needed for browsing.
++  NOTIMPLEMENTED();
++  return std::vector<mojom::VmRegionPtr>();
++}
++
++}  // namespace memory_instrumentation

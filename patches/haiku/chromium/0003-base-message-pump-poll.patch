@@ -1,0 +1,214 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] base: run MessagePumpEpoll in poll() mode with a pipe wake-up on Haiku
+
+Applies after the FreeBSD 156.0.8078.79 patches and tools/haikuify.py.
+---
+diff --git a/base/message_loop/haiku_epoll_types.h b/base/message_loop/haiku_epoll_types.h
+new file mode 100644
+index 0000000000..a43f11da1b
+--- /dev/null
++++ b/base/message_loop/haiku_epoll_types.h
+@@ -0,0 +1,47 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef BASE_MESSAGE_LOOP_HAIKU_EPOLL_TYPES_H_
++#define BASE_MESSAGE_LOOP_HAIKU_EPOLL_TYPES_H_
++
++// Haiku has no epoll. MessagePumpEpoll runs in its poll() mode on Haiku and
++// only needs epoll's data types and event bits for its bookkeeping; no epoll
++// system call is ever made (see message_pump_epoll.cc). The bit values only
++// need to be distinct, they are translated to poll() bits before use.
++
++#include <poll.h>
++#include <stdint.h>
++
++#include "build/build_config.h"
++
++static_assert(BUILDFLAG(IS_HAIKU), "Only for Haiku");
++
++#ifndef POLLRDHUP
++// Haiku reports peer hang-up through POLLHUP.
++#define POLLRDHUP 0
++#endif
++
++enum HaikuEpollEvents : uint32_t {
++  EPOLLIN = 0x001,
++  EPOLLPRI = 0x002,
++  EPOLLOUT = 0x004,
++  EPOLLERR = 0x008,
++  EPOLLHUP = 0x010,
++  EPOLLRDHUP = 0x2000,
++  EPOLLONESHOT = 1u << 30,
++};
++
++typedef union epoll_data {
++  void* ptr;
++  int fd;
++  uint32_t u32;
++  uint64_t u64;
++} epoll_data_t;
++
++struct epoll_event {
++  uint32_t events;
++  epoll_data_t data;
++};
++
++#endif  // BASE_MESSAGE_LOOP_HAIKU_EPOLL_TYPES_H_
+diff --git a/base/message_loop/message_pump_epoll.cc b/base/message_loop/message_pump_epoll.cc
+index b7f6e832e9..86c0701e3a 100644
+--- a/base/message_loop/message_pump_epoll.cc
++++ b/base/message_loop/message_pump_epoll.cc
+@@ -4,7 +4,16 @@
+ 
+ #include "base/message_loop/message_pump_epoll.h"
+ 
++#include "build/build_config.h"
++
++#if BUILDFLAG(IS_HAIKU)
++#include <fcntl.h>
++#include <unistd.h>
++
++#include "base/notreached.h"
++#else
+ #include <sys/eventfd.h>
++#endif
+ 
+ #include <algorithm>
+ #include <cstddef>
+@@ -48,6 +57,23 @@ constexpr std::pair<uint32_t, short int> kEpollToPollEvents[] = {
+     {EPOLLIN, POLLIN},   {EPOLLOUT, POLLOUT},
+     {EPOLLPRI, POLLPRI}, {EPOLLERR, POLLERR}, {EPOLLHUP, POLLHUP}};
+ 
++#if BUILDFLAG(IS_HAIKU)
++// Haiku has no epoll. The pump always takes its poll() path there (see
++// WaitForEpollEvents()), so registering with the epoll instance is a no-op and
++// epoll_wait() is never reached.
++constexpr int EPOLL_CTL_ADD = 1;
++constexpr int EPOLL_CTL_DEL = 2;
++constexpr int EPOLL_CTL_MOD = 3;
++
++int epoll_ctl(int, int, int, epoll_event*) {
++  return 0;
++}
++
++int epoll_wait(int, epoll_event*, int, int) {
++  NOTREACHED();
++}
++#endif  // BUILDFLAG(IS_HAIKU)
++
+ void SetEventsForPoll(const uint32_t epoll_events, struct pollfd* poll_entry) {
+   poll_entry->events = 0;
+   for (const auto& epoll_poll : kEpollToPollEvents) {
+@@ -139,11 +165,23 @@ class MessagePumpEpoll::Interest : public RefCounted<Interest> {
+ };
+ 
+ MessagePumpEpoll::MessagePumpEpoll() {
++#if BUILDFLAG(IS_HAIKU)
++  // Wake-ups go through a non-blocking pipe instead of an eventfd.
++  int fds[2];
++  PCHECK(pipe(fds) == 0);
++  for (int fd : fds) {
++    PCHECK(fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0);
++    PCHECK(fcntl(fd, F_SETFD, FD_CLOEXEC) == 0);
++  }
++  wake_event_.reset(fds[0]);
++  wake_write_.reset(fds[1]);
++#else
+   epoll_.reset(epoll_create1(/*flags=*/0));
+   PCHECK(epoll_.is_valid());
+ 
+   wake_event_.reset(eventfd(0, EFD_NONBLOCK));
+   PCHECK(wake_event_.is_valid());
++#endif
+ 
+   epoll_event wake{.events = EPOLLIN, .data = {.ptr = &wake_event_}};
+   int rv = epoll_ctl(epoll_.get(), EPOLL_CTL_ADD, wake_event_.get(), &wake);
+@@ -303,6 +341,13 @@ void MessagePumpEpoll::Quit() {
+ }
+ 
+ void MessagePumpEpoll::ScheduleWork() {
++#if BUILDFLAG(IS_HAIKU)
++  // One byte is enough; EAGAIN means the pipe is full and therefore readable.
++  const char byte = 1;
++  ssize_t n = HANDLE_EINTR(write(wake_write_.get(), &byte, 1));
++  DPCHECK(n == 1 || errno == EAGAIN);
++  return;
++#else
+   const uint64_t value = 1;
+   ssize_t n = HANDLE_EINTR(write(wake_event_.get(), &value, sizeof(value)));
+ 
+@@ -311,6 +356,7 @@ void MessagePumpEpoll::ScheduleWork() {
+   // counter is non-zero and therefore readable, which is enough to ensure that
+   // any pending wait eventually wakes up.
+   DPCHECK(n == sizeof(value) || errno == EAGAIN);
++#endif  // BUILDFLAG(IS_HAIKU)
+ }
+ 
+ void MessagePumpEpoll::ScheduleDelayedWork(
+@@ -459,8 +505,13 @@ bool MessagePumpEpoll::WaitForEpollEvents(TimeDelta timeout) {
+   // to iterate through the list of watched fds. This value is pretty arbitrary,
+   // the internet suggests that under 1000 fds that epoll isn't noticeably
+   // faster than poll but this isn't easy to empirically measure.
++#if BUILDFLAG(IS_HAIKU)
++  // poll() is the only mechanism available on Haiku.
++  const bool use_poll = true;
++#else
+   bool use_poll =
+       g_use_poll.load(std::memory_order_relaxed) && entries_.size() < 500;
++#endif
+ 
+   if (use_poll) {
+     if (!GetEventsPoll(epoll_timeout, &poll_events)) {
+@@ -679,9 +730,16 @@ void MessagePumpEpoll::HandleEvent(int fd,
+ void MessagePumpEpoll::HandleWakeUp() {
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   BeginNativeWorkBatch();
++#if BUILDFLAG(IS_HAIKU)
++  // Drain the pipe; several ScheduleWork() calls may have queued bytes.
++  char buf[64];
++  while (HANDLE_EINTR(read(wake_event_.get(), buf, sizeof(buf))) > 0) {
++  }
++#else
+   uint64_t value;
+   ssize_t n = HANDLE_EINTR(read(wake_event_.get(), &value, sizeof(value)));
+   DPCHECK(n == sizeof(value));
++#endif
+ }
+ 
+ void MessagePumpEpoll::BeginNativeWorkBatch() {
+diff --git a/base/message_loop/message_pump_epoll.h b/base/message_loop/message_pump_epoll.h
+index 46b1593217..a6600d3ba8 100644
+--- a/base/message_loop/message_pump_epoll.h
++++ b/base/message_loop/message_pump_epoll.h
+@@ -6,7 +6,14 @@
+ #define BASE_MESSAGE_LOOP_MESSAGE_PUMP_EPOLL_H_
+ 
+ #include <poll.h>
++
++#include "build/build_config.h"
++
++#if BUILDFLAG(IS_HAIKU)
++#include "base/message_loop/haiku_epoll_types.h"
++#else
+ #include <sys/epoll.h>
++#endif
+ 
+ #include <cstdint>
+ #include <map>
+@@ -265,8 +272,14 @@ class BASE_EXPORT MessagePumpEpoll : public MessagePump,
+   ScopedFD epoll_;
+ 
+   // An eventfd object used to wake the pump's thread when scheduling new work.
++  // On Haiku (no eventfd) this is the read end of a pipe.
+   ScopedFD wake_event_;
+ 
++#if BUILDFLAG(IS_HAIKU)
++  // Write end of the wake-up pipe.
++  ScopedFD wake_write_;
++#endif
++
+   // Tracks when we should next record periodic metrics.
+   base::TimeTicks next_metrics_time_;
+ 
