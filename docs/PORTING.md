@@ -199,7 +199,7 @@ system libwayland).
 | Toolchain | LLVM libc++ and lld targeting Haiku at Chromium scale | Try `use_lld=false` if linking fails. |
 | libc gaps | Resolved for hrev60319, see [Target results](#target-results) | Re-run `tools/probe-haiku-libc.sh` on newer Haiku revisions. |
 | lld | `ld.lld` aborted once during the probe, on a link with an undefined symbol, instead of reporting an error | Successful links are unaffected. A link error in the Chromium build may show up as an lld crash dialog instead of a message; rerun that step with `-v` to see the symbol. |
-| Wayland | Haiku's libwayland version may be older than Chromium's minimum, or lack protocols | Check `third_party/wayland/wayland_version.gni` against the system version. Chromium needs xdg-shell and wl_shm. |
+| Wayland | Chromium 156 requires system libwayland >= 1.26; hrev60319 ships 1.21.90 | Patch 0001 lowers the minimum to 1.21 on Haiku. Chromium's Wayland code calls nothing newer. If the link step reports a missing `wl_*` symbol from generated protocol code, that symbol is the next thing to backport. |
 | Build tools | esbuild (Go) and tsgo (Go) have no native Haiku builds | Use `esbuild-wasm` under node. Use `use_typescript_go=false`. |
 | NSS | Chromium on Linux needs system NSS/NSPR | Use HaikuPorts' NSS, or port it. |
 | ffmpeg | `third_party/ffmpeg` (tarball only, not inspected yet) picks a generated config directory by OS name | If GN asks for a `haiku` config directory, map Haiku to the `linux` configs, as FreeBSD does for itself. |

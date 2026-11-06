@@ -46,8 +46,8 @@ _need RUSTFMT      rustfmt      "HaikuPorts rust_bin"      rustfmt
 _need BINDGEN      bindgen      "cargo install bindgen-cli" bindgen
 _need PYTHON       python3      "HaikuPorts python3*"      python3
 _need NINJA        ninja        "HaikuPorts ninja"         ninja
-_need NODE         node         "HaikuPorts nodejs*"       node
-_need GPERF        gperf        "HaikuPorts gperf"         gperf
+_need NODE         node         "pkgman install cmd:node"  node
+_need GPERF        gperf        "pkgman install cmd:gperf" gperf
 _need PKG_CONFIG   pkg-config   "HaikuPorts pkgconfig"     pkg-config pkgconf
 _need BISON        bison        "HaikuPorts bison"         bison
 _need FLEX         flex         "HaikuPorts flex"          flex
@@ -93,7 +93,16 @@ for m in wayland-client wayland-cursor wayland-egl xkbcommon glib-2.0 nss nspr e
   if [ -n "${PKG_CONFIG:-}" ] && "$PKG_CONFIG" --exists "$m" 2>/dev/null; then
     printf '  %-20s %s\n' "$m" "$("$PKG_CONFIG" --modversion "$m")"
   else
-    _missing+=("pkg-config module $m")
+    case $m in
+      wayland-*) pkg=devel:libwayland_client ;;
+      xkbcommon) pkg=devel:libxkbcommon ;;
+      glib-2.0)  pkg=devel:libglib_2.0 ;;
+      nss)       pkg=devel:libnss3 ;;
+      nspr)      pkg=devel:libnspr4 ;;
+      expat)     pkg=devel:libexpat ;;
+      *)         pkg=$m ;;
+    esac
+    _missing+=("pkg-config module $m (pkgman install $pkg)")
   fi
 done
 

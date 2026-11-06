@@ -290,6 +290,44 @@ index 0000000000..ae580ab010
 +    current_os = "haiku"
 +  }
 +}
+diff --git a/third_party/wayland/BUILD.gn b/third_party/wayland/BUILD.gn
+index 30c0dfba13..2b41c68bfb 100644
+--- a/third_party/wayland/BUILD.gn
++++ b/third_party/wayland/BUILD.gn
+@@ -245,9 +245,17 @@ if (!use_system_libwayland) {
+   # use_system_libwayland
+   import("wayland_version.gni")
+ 
++  _wayland_min_version = wayland_version
++  if (is_haiku) {
++    # Haiku ships libwayland 1.21.x (with its in-process server add-on).
++    # Chromium's own Wayland code needs nothing newer than 1.21; generated
++    # protocol code is checked at link time.
++    _wayland_min_version = "1.21.0"
++  }
++
+   pkg_config("wayland_server_config") {
+     packages = [ "wayland-server" ]
+-    extra_args = [ "wayland-server >= $wayland_version" ]
++    extra_args = [ "wayland-server >= $_wayland_min_version" ]
+   }
+ 
+   group("wayland_server") {
+@@ -260,12 +268,12 @@ if (!use_system_libwayland) {
+ 
+   pkg_config("wayland_client_config") {
+     packages = [ "wayland-client" ]
+-    extra_args = [ "wayland-client >= $wayland_version" ]
++    extra_args = [ "wayland-client >= $_wayland_min_version" ]
+   }
+ 
+   pkg_config("wayland_cursor_config") {
+     packages = [ "wayland-cursor" ]
+-    extra_args = [ "wayland-cursor >= $wayland_version" ]
++    extra_args = [ "wayland-cursor >= $_wayland_min_version" ]
+   }
+ 
+   pkg_config("wayland_egl_config") {
 diff --git a/third_party/wayland/features.gni b/third_party/wayland/features.gni
 index 6a20f869e7..772853eeb5 100644
 --- a/third_party/wayland/features.gni
