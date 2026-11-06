@@ -120,7 +120,7 @@ index 860e11c117..7f6687b861 100644
  
  bool BeingDebugged() {
 diff --git a/base/debug/stack_trace_posix.cc b/base/debug/stack_trace_posix.cc
-index ddc7e46323..8545a334d2 100644
+index ddc7e46323..52d4ec2803 100644
 --- a/base/debug/stack_trace_posix.cc
 +++ b/base/debug/stack_trace_posix.cc
 @@ -326,7 +326,8 @@ void PrintToStderr(const char* output) {
@@ -129,7 +129,7 @@ index ddc7e46323..8545a334d2 100644
  
 -#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD)
 +#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || \
-+    BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU)
++    (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
  void AlarmSignalHandler(int signal, siginfo_t* info, void* void_context) {
    // We have seen rare cases on AMD linux where the default signal handler
    // either does not run or a thread (Probably an AMD driver thread) prevents
@@ -139,30 +139,32 @@ index ddc7e46323..8545a334d2 100644
  
 -#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD)
 +#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || \
-+    BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU)
++    (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
    // Set an alarm to trigger in case the default handler does not terminate
    // the process. See 'AlarmSignalHandler' for more details.
    struct sigaction action;
 diff --git a/base/files/dir_reader_posix.h b/base/files/dir_reader_posix.h
-index ed1eeb760a..9c8cf1f427 100644
+index ed1eeb760a..d91375b8e4 100644
 --- a/base/files/dir_reader_posix.h
 +++ b/base/files/dir_reader_posix.h
-@@ -17,7 +17,8 @@
+@@ -17,7 +17,9 @@
  // seems worse than falling back to enumerating all file descriptors so we will
  // probably never implement this on the Mac.
  
 -#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
 +// Haiku has no getdents(); it uses the generic fallback.
++// haikuify: bsd-only
 +#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_BSD)
  #include "base/files/dir_reader_linux.h"
  #else
  #include "base/files/dir_reader_fallback.h"
-@@ -25,7 +26,8 @@
+@@ -25,7 +27,9 @@
  
  namespace base {
  
 -#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
 +// Haiku has no getdents(); it uses the generic fallback.
++// haikuify: bsd-only
 +#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_BSD)
  typedef DirReaderLinux DirReaderPosix;
  #else

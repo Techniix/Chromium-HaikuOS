@@ -22,7 +22,12 @@ Haiku needs its own implementation (usually with a BUILDFLAG(IS_HAIKU) branch).
 Usage:
     haikuify.py SRC_DIR [--report report.md] [--dry-run] [--paths a b ...]
 
-The tool is idempotent: already-converted guards are left alone.
+The tool is idempotent: already-converted guards are left alone. Guards that
+must stay BSD-only on purpose carry a "haikuify: bsd-only" comment on the same
+line or the line above, and are never converted.
+
+Run it before the Haiku patches (scripts/prepare-tree.sh does). On a tree that
+already has them, only --python-only is safe.
 """
 
 import argparse
@@ -244,11 +249,21 @@ def guard_body(lines, i):
     return lines[max(0, i - 3): i + 25]
 
 
+BSD_ONLY_MARKER = "haikuify: bsd-only"
+
+
+def _marked_bsd_only(lines, i):
+    """A deliberate BSD-only guard, marked on its line or the line above."""
+    return BSD_ONLY_MARKER in lines[i] or (i > 0 and BSD_ONLY_MARKER in lines[i - 1])
+
+
 def classify_cxx(lines, extra_re=None):
     """Return {line_index: (body, bsd_tokens)} for unconverted BSD guards."""
     out = {}
     for i, line in enumerate(lines):
         if "BUILDFLAG(IS_BSD)" not in line or not CXX_GUARD_RE.search(line):
+            continue
+        if _marked_bsd_only(lines, i):
             continue
         body = guard_body(lines, i)
         toks = bsd_tokens(body)
@@ -333,6 +348,8 @@ def process_gn(path, text, report, stats, verify):
         code = strip_gn_comment(line)
         if not GN_GUARD_RE.search(code):
             continue
+        if _marked_bsd_only(lines, i):
+            continue
         body = gn_block_extent(lines, i)
         toks = bsd_tokens([strip_gn_comment(b) for b in body])
         if toks:
@@ -365,12 +382,87 @@ def _haiku_value(text):
         "'freebsd'", "'haiku'").replace('"freebsd"', '"haiku"')
 
 
+# A previous version of this tool turned a lone call argument such as
+# startswith('freebsd') into startswith('freebsd', 'haiku'), which passes
+# 'haiku' as the start index. Recognise that output so it can be repaired.
+PY_BAD_CALL_RE = re.compile(
+    r"""([\w.]*\b\w+)\((['"])freebsd\2, \2haiku\2\)""")
+PY_SOLE_ARG_RE = re.compile(r"""(\w+)\(\s*(['"])freebsd\2\s*\)""")
+PY_OURS_RE = re.compile(r"""freebsd['"]\)?, \(?['"]haiku""")
+
+
+def _is_ours(lines, i):
+    """True if line i mentions Haiku only because this tool added it."""
+    line = lines[i]
+    if PY_OURS_RE.search(line):
+        return True
+    # A 'haiku': ... dict entry right after the 'freebsd': ... one it mirrors.
+    return (i > 0 and
+            re.match(r"""^\s*['"](haiku|Haiku)['"]\s*:""", line) is not None and
+            re.match(r"""^\s*['"](freebsd|FreeBSD)['"]\s*:""", lines[i - 1])
+            is not None)
+
+
+def _haiku_aware(lines):
+    """The file handled Haiku on its own, before this tool touched it."""
+    return any("haiku" in l.lower() and not _is_ours(lines, i)
+               for i, l in enumerate(lines))
+
+
+def _enclosing_call(line, pos):
+    """If the string at `pos` is inside a call's parentheses on this line,
+    return the called name; else None (list, tuple, or multi-line context)."""
+    depth = 0
+    for j in range(pos - 1, -1, -1):
+        c = line[j]
+        if c in ")]}":
+            depth += 1
+        elif c in "([{":
+            if depth:
+                depth -= 1
+                continue
+            if c != "(":
+                return None
+            k = j - 1
+            while k >= 0 and line[k] == " ":
+                k -= 1
+            m = re.search(r"([\w.]+)$", line[:k + 1])
+            if not m or m.group(1) in ("in", "not", "and", "or", "return",
+                                       "if", "elif", "else", "for", "yield"):
+                return None
+            return m.group(1)
+    return None
+
+
 def process_py(path, text, report, stats):
     if "freebsd" not in text.lower() or "test" in os.path.basename(path):
         return text, False
     lines = text.split("\n")
-    out = []
     changed = False
+
+    # Repair output of the old, buggy call-argument rewrite first.
+    aware = None
+    for i, line in enumerate(lines):
+        if not PY_BAD_CALL_RE.search(line):
+            continue
+        if aware is None:
+            aware = _haiku_aware(lines)
+
+        def fix(m):
+            name, q = m.group(1), m.group(2)
+            if not aware and name.split(".")[-1] in ("startswith", "endswith"):
+                return f"{name}(({q}freebsd{q}, {q}haiku{q}))"
+            return f"{name}({q}freebsd{q})"
+        lines[i] = PY_BAD_CALL_RE.sub(fix, line)
+        changed = True
+        stats["repaired"] = stats.get("repaired", 0) + 1
+
+    # A file that already handles Haiku itself (e.g. GN's build/gen.py) is
+    # left alone: adding Haiku to its FreeBSD cases would shadow its own.
+    if _haiku_aware(lines):
+        return "\n".join(lines), changed
+
+    out = []
     for i, line in enumerate(lines):
         out.append(line)
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
@@ -393,10 +485,27 @@ def process_py(path, text, report, stats):
             changed = True
             stats["converted"] += 1
             continue
-        if PY_LIST_ITEM_RE.search(line):
-            out[-1] = PY_LIST_ITEM_RE.sub(
-                lambda mm: f"{mm.group(0)}, {mm.group(1)}haiku{mm.group(1)}",
-                line)
+        sole = PY_SOLE_ARG_RE.search(line)
+        if sole:
+            if sole.group(1) in ("startswith", "endswith"):
+                q = sole.group(2)
+                out[-1] = PY_SOLE_ARG_RE.sub(
+                    lambda mm: f"{mm.group(1)}(({q}freebsd{q}, {q}haiku{q}))",
+                    line)
+                changed = True
+                stats["converted"] += 1
+            else:
+                report.append(Site(path, i + 1, line.strip(),
+                                   [f"'freebsd' passed to {sole.group(1)}() (Python)"]))
+                stats["manual"] += 1
+            continue
+        items = [mm for mm in PY_LIST_ITEM_RE.finditer(line)
+                 if _enclosing_call(line, mm.start(1)) is None]
+        if items:
+            for mm in reversed(items):
+                q = mm.group(1)
+                line = line[:mm.end()] + f", {q}haiku{q}" + line[mm.end():]
+            out[-1] = line
             changed = True
             stats["converted"] += 1
             continue
@@ -405,7 +514,7 @@ def process_py(path, text, report, stats):
                                ["freebsd string (Python), not a list item"]))
             stats["manual"] += 1
             continue
-        if re.search(r"""['"]FreeBSD['"]""", line) and "haiku" not in line.lower():
+        if re.search(r"""['"]FreeBSD['"]""", line):
             report.append(Site(path, i + 1, line.strip(),
                                ["FreeBSD platform check (Python)"]))
             stats["manual"] += 1
@@ -430,6 +539,9 @@ def main():
     ap.add_argument("--report", default="haikuify-report.md")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--paths", nargs="*", help="limit to these subpaths of src")
+    ap.add_argument("--python-only", action="store_true",
+                    help="only process Python files (safe to run on a tree "
+                         "that already has the Haiku patches applied)")
     args = ap.parse_args()
 
     report = []
@@ -438,6 +550,8 @@ def main():
     for path in iter_files(args.src, args.paths):
         ext = os.path.splitext(path)[1]
         if ext not in CXX_EXTS and ext not in GN_EXTS and ext != ".py":
+            continue
+        if args.python_only and ext != ".py":
             continue
         try:
             with open(path, encoding="utf-8") as f:
@@ -489,6 +603,8 @@ def main():
                 f.write(f"\n### `{s.path}`\n\n")
                 cur = s.path
             f.write(f"- L{s.line}: `{s.text[:110]}` — uses {', '.join(s.reasons)}\n")
+    if stats.get("repaired"):
+        print(f"repaired={stats['repaired']} lines from an earlier haikuify version")
     print(f"converted={stats['converted']} files={stats['files']} "
           f"manual={stats['manual']} verify={len(verify)} report={args.report}"
           f"{' (dry run)' if args.dry_run else ''}")

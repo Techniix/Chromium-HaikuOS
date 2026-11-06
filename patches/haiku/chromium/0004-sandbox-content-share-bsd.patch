@@ -18,7 +18,7 @@ index 55fc2ca661..3d7fea7bb1 100644
          "gpu_pre_sandbox_hook_bsd.cc",
          "gpu_pre_sandbox_hook_bsd.h",
 diff --git a/content/utility/utility_main.cc b/content/utility/utility_main.cc
-index 5474a716f9..bcb16e653a 100644
+index 5474a716f9..3d7310b43b 100644
 --- a/content/utility/utility_main.cc
 +++ b/content/utility/utility_main.cc
 @@ -45,7 +45,8 @@
@@ -26,8 +26,8 @@ index 5474a716f9..bcb16e653a 100644
  #include "services/video_capture/public/mojom/video_capture_service.mojom.h"
  
 -#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD)
-+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_BSD) || \
-+    BUILDFLAG(IS_HAIKU)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
++    (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
  #include "base/file_descriptor_store.h"
  #include "base/files/file_util.h"
  #include "base/pickle.h"
@@ -36,15 +36,15 @@ index 5474a716f9..bcb16e653a 100644
  #include "services/shape_detection/shape_detection_sandbox_hook.h"
  
 -#if BUILDFLAG(IS_BSD)
-+#if BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU)
++#if (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
  #include "sandbox/policy/sandbox.h"
  #include "content/common/gpu_pre_sandbox_hook_bsd.h"
  #endif
 diff --git a/sandbox/policy/BUILD.gn b/sandbox/policy/BUILD.gn
-index f13bef09c0..afadb64912 100644
+index f13bef09c0..2aa0a1bedf 100644
 --- a/sandbox/policy/BUILD.gn
 +++ b/sandbox/policy/BUILD.gn
-@@ -131,19 +131,24 @@ component("policy") {
+@@ -131,19 +131,25 @@ component("policy") {
      ]
      libs = [ "util" ]
    }
@@ -65,7 +65,8 @@ index f13bef09c0..afadb64912 100644
 -      "//ui/gfx/x",
      ]
    }
-+  if ((is_bsd || is_haiku)) {
++  # haikuify: bsd-only
++  if (is_bsd) {
 +    # Haiku has no X11.
 +    deps += [ "//ui/gfx/x" ]
 +  }

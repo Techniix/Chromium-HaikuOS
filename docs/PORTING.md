@@ -48,6 +48,11 @@ decision. `tools/haikuify.py` makes most of those decisions automatically.
    - `is_bsd` → `(is_bsd || is_haiku)` in GN (never on an assignment target),
    - FreeBSD entries in Python OS tables → an extra Haiku entry.
 
+   In Python, files that already handle Haiku themselves (such as GN's
+   `build/gen.py`) are left alone, and a lone call argument is never treated
+   as a list item. For example, `startswith('freebsd')` becomes
+   `startswith(('freebsd', 'haiku'))`, and other calls are reported instead.
+
    A guard is left BSD-only when the code it would select for Haiku uses
    BSD-kernel interfaces, or calls a function that is itself defined only
    under such a guard. Negated guards (`!BUILDFLAG(IS_BSD)`) are judged by
@@ -55,6 +60,11 @@ decision. `tools/haikuify.py` makes most of those decisions automatically.
    2,986 guards and leaves 39 for hand-porting (next section). Its report
    also lists 6 converted sites that use BSD-libc functions whose
    availability on Haiku must be confirmed with `tools/probe-haiku-libc.sh`.
+
+   Guards that the Haiku patches keep BSD-only on purpose carry a
+   `haikuify: bsd-only` comment, which the tool always respects. Re-running
+   the tool on a prepared tree is therefore a no-op. `--python-only`
+   restricts it to Python files.
 3. **Haiku patches** (`patches/haiku/`, `patch -p1`), described below.
 4. **Toolchain paths**: the FreeBSD patches hard-code FreeBSD's LLVM layout
    (`${LOCALBASE}/llvmNN/...`). Each is replaced with the path detected on
