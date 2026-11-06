@@ -52,9 +52,11 @@ _need PKG_CONFIG   pkg-config   "HaikuPorts pkgconfig"     pkg-config pkgconf
 _need BISON        bison        "HaikuPorts bison"         bison
 _need FLEX         flex         "HaikuPorts flex"          flex
 _need GIT          git          "HaikuPorts git"           git
-# esbuild is a Go program; on Haiku the WebAssembly build runs under node:
-#   npm install -g esbuild-wasm   (provides an `esbuild` command)
-_need ESBUILD      esbuild      "npm install -g esbuild-wasm" esbuild
+# esbuild is a Go program; on Haiku the WebAssembly build runs under node.
+# /boot/system is read-only, so npm's global prefix must point at the
+# writable non-packaged hierarchy (already on PATH):
+#   npm config set prefix ~/config/non-packaged && npm install -g esbuild-wasm
+_need ESBUILD      esbuild      "pkgman install npm; npm config set prefix ~/config/non-packaged; npm install -g esbuild-wasm" esbuild
 _want TSGO         tsgo         "" tsgo
 _want CLANG_FORMAT clang-format "" clang-format
 
@@ -83,7 +85,7 @@ fi
 if [ -n "${PYTHON:-}" ]; then
   LIBCLANG_BINDINGS_DIR=$("$PYTHON" -c 'import clang, os; print(os.path.dirname(os.path.dirname(clang.__file__)))' 2>/dev/null || true)
   if [ -z "$LIBCLANG_BINDINGS_DIR" ]; then
-    _missing+=("python clang bindings (python3 -m pip install clang==<your clang major version>)")
+    _missing+=("python clang bindings (python3 -m pip install --user \"clang==$(clang -dumpversion | cut -d. -f1).*\")")
   fi
   export LIBCLANG_BINDINGS_DIR
 fi

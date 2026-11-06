@@ -59,9 +59,18 @@ scripts/run-chromium.sh work/chromium-156.0.8078.79/out/Release
 
 `detect-toolchain.sh` names the HaikuPorts package for anything missing. The
 main requirements are LLVM/Clang with lld, Rust, Python 3, Ninja, Node.js,
-gperf, `bindgen` (`cargo install bindgen-cli`), `esbuild`
-(`npm install -g esbuild-wasm`), the Python libclang bindings, and the
-development packages for wayland, libxkbcommon, glib, nss and expat.
+gperf, `bindgen` (`cargo install bindgen-cli`), `esbuild`, the Python libclang
+bindings, and the development packages for wayland, libxkbcommon, glib, nss
+and expat.
+
+`/boot/system` is read-only on Haiku, so install npm and pip tools into your
+home directory:
+
+```sh
+npm config set prefix ~/config/non-packaged   # bin/ is already on PATH
+npm install -g esbuild-wasm
+python3 -m pip install --user "clang==$(clang -dumpversion | cut -d. -f1).*"
+```
 
 Please attach the output of `probe-haiku-libc.sh` and the first failing
 compile step when reporting a build problem.
