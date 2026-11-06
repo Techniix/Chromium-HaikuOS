@@ -69,7 +69,7 @@ home directory:
 ```sh
 npm config set prefix ~/config/non-packaged   # bin/ is already on PATH
 npm install -g esbuild-wasm
-python3 -m pip install --user "clang==$(clang -dumpversion | cut -d. -f1).*"
+python3 -m pip install --user clang   # newest bindings work with newer libclang
 ```
 
 Please attach the output of `probe-haiku-libc.sh` and the first failing

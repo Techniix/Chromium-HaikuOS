@@ -81,11 +81,12 @@ if [ -n "${RUSTC:-}" ]; then
   printf '  %-20s %s (%s)\n' "rust sysroot" "$RUST_SYSROOT" "$RUSTC_VERSION"
 fi
 
-# Python bindings for libclang, used by V8's metagen (pip install clang==MAJOR).
+# Python bindings for libclang, used by V8's metagen (pip install --user clang; the newest
+# release works with newer libclang versions too).
 if [ -n "${PYTHON:-}" ]; then
   LIBCLANG_BINDINGS_DIR=$("$PYTHON" -c 'import clang, os; print(os.path.dirname(os.path.dirname(clang.__file__)))' 2>/dev/null || true)
   if [ -z "$LIBCLANG_BINDINGS_DIR" ]; then
-    _missing+=("python clang bindings (python3 -m pip install --user \"clang==$(clang -dumpversion | cut -d. -f1).*\")")
+    _missing+=("python clang bindings (python3 -m pip install --user clang)")
   fi
   export LIBCLANG_BINDINGS_DIR
 fi
