@@ -102,17 +102,21 @@ index 0e3bcb4558..f17ccdada4 100644
  #define BUILDFLAG_INTERNAL_IS_IOS() (1)
  #else
 diff --git a/build/config/BUILD.gn b/build/config/BUILD.gn
-index fe61f3f7fa..c99f1bb819 100644
+index fe61f3f7fa..2e0c93630e 100644
 --- a/build/config/BUILD.gn
 +++ b/build/config/BUILD.gn
-@@ -207,6 +207,10 @@ config("default_libs") {
+@@ -207,6 +207,14 @@ config("default_libs") {
      # Targets should choose to explicitly link frameworks they require. Since
      # linking can have run-time side effects, nothing should be listed here.
      libs = []
 +  } else if (is_haiku) {
 +    # pthreads, libm and libdl all live in libroot, which is linked implicitly.
-+    # BSD-style sockets and the resolver live in libnetwork.
-+    libs = [ "network" ]
++    # BSD-style sockets and the resolver live in libnetwork; arc4random_buf,
++    # explicit_bzero, ppoll and dl_iterate_phdr live in libbsd.
++    libs = [
++      "bsd",
++      "network",
++    ]
    } else if ((is_bsd || is_haiku)) {
      libs = [
        "pthread",

@@ -51,6 +51,11 @@ probe() {
 
 echo "Compiler: $($CC --version 2>/dev/null | head -1)"
 echo "System:   $(uname -a)"
+for l in ld.lld ld; do
+  if command -v "$l" >/dev/null 2>&1; then
+    echo "Linker:   $($l --version 2>/dev/null | head -1)"; break
+  fi
+done
 echo
 
 # Converted guards that select BSD-libc code (docs/haikuify-report.md).

@@ -197,12 +197,31 @@ system libwayland).
 | Area | Risk | Plan |
 | --- | --- | --- |
 | Toolchain | LLVM libc++ and lld targeting Haiku at Chromium scale | Try `use_lld=false` if linking fails. |
-| libc gaps | `getentropy`, `getdents`, `MADV_FREE`, `memfd_create`, `pthread_getattr_np`, `malloc_usable_size` | Run `tools/probe-haiku-libc.sh` first. Each "no" needs a Haiku branch. |
+| libc gaps | Resolved for hrev60319, see [Target results](#target-results) | Re-run `tools/probe-haiku-libc.sh` on newer Haiku revisions. |
+| lld | `ld.lld` aborted once during the probe, on a link with an undefined symbol, instead of reporting an error | Successful links are unaffected. A link error in the Chromium build may show up as an lld crash dialog instead of a message; rerun that step with `-v` to see the symbol. |
 | Wayland | Haiku's libwayland version may be older than Chromium's minimum, or lack protocols | Check `third_party/wayland/wayland_version.gni` against the system version. Chromium needs xdg-shell and wl_shm. |
 | Build tools | esbuild (Go) and tsgo (Go) have no native Haiku builds | Use `esbuild-wasm` under node. Use `use_typescript_go=false`. |
 | NSS | Chromium on Linux needs system NSS/NSPR | Use HaikuPorts' NSS, or port it. |
 | ffmpeg | `third_party/ffmpeg` (tarball only, not inspected yet) picks a generated config directory by OS name | If GN asks for a `haiku` config directory, map Haiku to the `linux` configs, as FreeBSD does for itself. |
 | Shared memory | `base/memory/platform_shared_memory_region_posix.cc` uses `shm_open`/`memfd` paths | Confirm Haiku's `shm_open` works for cross-team sharing. |
+
+## Target results
+
+`tools/probe-haiku-libc.sh` on Haiku R1~beta6+development hrev60319
+(x86_64, 2026-11-02):
+
+| Result | Interfaces | What the port does |
+| --- | --- | --- |
+| yes | getentropy, MADV_FREE/DONTNEED, posix_madvise, MAP_NORESERVE, MAP_ANONYMOUS, malloc_usable_size, pthread_getattr_np, pthread_attr_getstack, _SC_PHYS_PAGES, _SC_NPROCESSORS_ONLN, pipe2, SOCK_CLOEXEC, MSG_NOSIGNAL, SO_PEERCRED, posix_fallocate, O_DIRECTORY, getdtablesize, getpgid, strlcpy, reallocarray, utimensat, mkostemp | Used as is. The generic stack-bounds paths (`pthread_getattr_np`) work. |
+| yes, in libbsd | arc4random_buf, explicit_bzero, ppoll, dl_iterate_phdr | `bsd` is in Haiku's `default_libs` (patch 0001). |
+| yes, in libnetwork | accept4 | `network` is in Haiku's `default_libs`. |
+| no | getdents | Haiku uses `DirReaderFallback` (patch 0002). |
+| no | memfd_create | Not needed. Shared memory uses files in the temp directory, as on BSD. The only converted `memfd_create` user is test code. |
+| no | sched_getaffinity | Only used under `IS_LINUX`. |
+| no | getpeereid | Not used by anything Haiku builds. |
+| no | backtrace | Already excluded (glibc/Apple only). Crash logs have no stack traces for now. |
+| no | POLLRDHUP | `haiku_epoll_types.h` defines it as 0. |
+| no | epoll, eventfd, inotify | Expected. The poll()-based pump and the stub file watcher avoid them. |
 
 ## Updating to a new Chromium release
 
