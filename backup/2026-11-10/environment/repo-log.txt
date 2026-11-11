@@ -1,0 +1,3 @@
+7835a6f Fix Python rewrite that broke GN bootstrap; keep Haiku off X11
+ad4acdd Don't pin the libclang Python bindings to the Clang major version
+48301a3 Install npm and pip tools into the user's home on Haiku

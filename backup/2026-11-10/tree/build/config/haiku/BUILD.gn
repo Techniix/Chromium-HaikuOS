@@ -1,0 +1,75 @@
+# Copyright 2026 The Chromium Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# Haiku-specific additions on top of //build/config/linux. Haiku is built as a
+# Linux-like target in GN (is_linux && is_haiku), so the Linux configs apply
+# first and this file only adds what Haiku needs on top.
+
+# Applied to every target through //build/config/compiler:compiler.
+config("compiler") {
+  defines = [
+    # Haiku hides BSD and GNU extensions (e.g. getentropy, strlcpy, memmem,
+    # pipe2) behind these feature macros.
+    "_DEFAULT_SOURCE",
+    "_GNU_SOURCE",
+
+    # libc++ has no Haiku ctype/rune table; use its built-in classic table.
+    "_LIBCPP_PROVIDES_DEFAULT_RUNE_TABLE",
+
+    # No suspend on Haiku: monotonic == boot time.
+    "CLOCK_BOOTTIME=CLOCK_MONOTONIC",
+    "CLOCK_MONOTONIC_RAW=CLOCK_MONOTONIC",
+
+    # Haiku spells "interface has carrier" IFF_LINK.
+    "IFF_RUNNING=IFF_LINK",
+
+    # No RTLD_NODELETE in Haiku's runtime loader.
+    "RTLD_NODELETE=0",
+  ]
+  cflags = [
+    # The Linux configs pass a few flags (e.g. -pthread, -fstack-clash-protection)
+    # that the Haiku Clang driver accepts but ignores; don't let the resulting
+    # warnings break -Werror builds.
+    "-Wno-unused-command-line-argument",
+
+    # Stubs for Linux-only <sys/...> headers (build/config/haiku/compat).
+    "-idirafter",
+    rebase_path("compat", root_build_dir),
+  ]
+  cflags_cc = [
+    "-include",
+    rebase_path("compat/haiku_cxx_prelude.h", root_build_dir),
+  ]
+}
+
+# Applied to every target through //build/config/compiler:runtime_library.
+config("runtime_library") {
+  # The Haiku Clang driver searches /boot/system/develop/headers/gcc/include
+  # (GCC's intrinsics and <stdatomic.h>) ahead of Clang's own builtin headers,
+  # which Clang can't compile. Put Clang's first. This config is applied after
+  # libc++'s, so libc++'s -isystem dirs still come before it.
+  clang_builtin_headers = "/boot/system/lib/clang/23/include"
+  clang_first = rebase_path("clang_first", root_build_dir)
+  cflags_c = [ "-isystem", clang_first, "-isystem", clang_builtin_headers ]
+  cflags_cc = [ "-isystem", clang_first, "-isystem", clang_builtin_headers ]
+  cflags_objc = cflags_c
+  cflags_objcc = cflags_cc
+  ldflags = [ "-L" + rebase_path("compat/lib", root_build_dir) ]
+
+  # libroot (libc, libm, pthreads, libdl) is linked implicitly by the Haiku
+  # Clang driver. libnetwork is added in //build/config:default_libs.
+}
+
+# Targets that call the native Haiku C++ API (Application Kit, Interface Kit,
+# Media Kit, ...) add this config.
+config("libbe") {
+  libs = [ "be" ]
+}
+
+config("libmedia") {
+  libs = [
+    "be",
+    "media",
+  ]
+}

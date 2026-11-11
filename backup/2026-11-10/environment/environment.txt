@@ -1,0 +1,12 @@
+Haiku shredder R1~beta6+development hrev60368+dirty Nov  7 2026 17: x86_64 x86_64 Haiku
+clang version 23.1.4
+rustc 1.94.1 (e408947bf 2026-03-25)
+v24.21.0
+Python 3.14.10
+/boot/home/quick-save-haiku.sh: line 57: go: command not found
+clang bindings: /boot/home/config/non-packaged/lib/python3.14/site-packages/clang/cindex.py
+-r-xr-xr-x 1 user root 65224872 Aug 14  2023 /boot/system/lib/libclang-cpp.so.12
+-r-xr-xr-x 1 user root 91151824 Oct 21 14:55 /boot/system/lib/libclang-cpp.so.23.1
+-r-xr-xr-x 1 user root 34551880 Aug 14  2023 /boot/system/lib/libclang.so.12
+lr-xr-xr-x 1 user root       18 Oct 21 16:03 /boot/system/lib/libclang.so.23.1 -> libclang.so.23.1.4
+-r-xr-xr-x 1 user root 52458488 Oct 21 15:51 /boot/system/lib/libclang.so.23.1.4

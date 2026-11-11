@@ -1,0 +1,372 @@
+Status  Name                       Description                                                                                  
+--------------------------------------------------------------------------------------------------------------------------------
+s       86box_roms                 ROM set for the 86Box emulator                                                               
+s       a52dec                     An ATSC A/52 decoding library                                                                
+s       assimp                     Importer library to import assets from 3D files                                              
+s       autoconf                   A tool to automatically configure source code                                                
+s       automake                   A tool for generating "Makefile.in" from "Makefile.am"                                       
+s       bash                       The GNU Bourne Again Shell                                                                   
+s       bc                         A console-based calculator utility                                                           
+s       bindgen                    Automatically generates Rust FFI bindings to C and C++ libraries                             
+s       binutils                   Assembler, linker and binary tools for target                                                
+s       bison                      A yacc-compatible parser generator                                                           
+s       brotli                     A generic-purpose lossless compression algorithm                                             
+s       bzip2                      Data compression utilities and libraries                                                     
+s       bzip2_devel                Data compression utilities and libraries (development files)                                 
+s       c_ares                     A C library for asynchronous DNS requests                                                    
+s       ca_root_certificates       Bundle of CA root certificates                                                               
+s       cairo                      Multi-platform 2D graphics library                                                           
+s       cairo_devel                Multi-platform 2D graphics library (development files)                                       
+s       capstone                   Lightweight multi-platform, multi-architecture disassembly framework                         
+s       cbindgen                   A tool for generating C binding to Rust code                                                 
+s       cdrtools                   A CD/DVD/Blu-ray premastering and recording software                                         
+s       cmake                      A cross-platform build system                                                                
+s       coreutils                  Standard GNU core utilities                                                                  
+s       curl                       A commandline-tool and library for downloading data from URLs                                
+s       curl_devel                 A commandline-tool and library for downloading data from URLs (development files)            
+s       dav1d                      A new AV1 cross-platform decoder                                                             
+s       dbus                       D-Bus provides simple way for applications to talk to one another                            
+s       dbus_devel                 D-Bus provides simple way for applications to talk to one another (development files)        
+s       diffutils                  Several programs for finding differences between files                                       
+s       double_conversion          Binary-decimal and decimal-binary routines for IEEE doubles                                  
+s       dtc                        The Device Tree Compiler                                                                     
+s       enca                       An Extremely Naive Charset Analyser library                                                  
+s       expat                      XML parser toolkit                                                                           
+s       expat_devel                XML parser toolkit (development files)                                                       
+s       faac                       An MPEG-4 and MPEG-2 AAC encoder                                                             
+s       faad2                      An open source MPEG-4 and MPEG-2 AAC decoder                                                 
+s       fdk_aac                    Fraunhofer AAC codec library                                                                 
+s       ffmpeg6                    Audio and video recording, conversion, and streaming library                                 
+s       ffmpeg8                    Audio and video recording, conversion, and streaming library                                 
+s       ffmpeg8_avdevice           Audio and video recording, conversion, and streaming library                                 
+s       ffmpeg8_devel              Audio and video recording, conversion, and streaming library (development files)             
+s       file                       Identify a file's format by scanning binary data for patterns                                
+s       file_data                  Magic file for the file(1) command                                                           
+s       findutils                  Basic directory searching utilities                                                          
+s       firefox                    A fast, private and open-source web browser                                                  
+s       flac                       The free lossless audio codec                                                                
+s       flac1.4                    The free lossless audio codec                                                                
+s       flex                       A tool for generating scanners                                                               
+s       flite                      A light-weight text-to-speech engine                                                         
+s       fluidsynth2                A software real-time synthesizer                                                             
+s       fluidsynth2_devel          A software real-time synthesizer (development files)                                         
+s       fluidsynth3                A software real-time synthesizer                                                             
+s       fontconfig                 A library for font customization and configuration                                           
+s       fontconfig_devel           A library for font customization and configuration (development files)                       
+s       freetype                   A free, high-quality, and portable font engine                                               
+s       freetype_devel             A free, high-quality, and portable font engine (development files)                           
+s       fribidi                    A free implementation of the unicode bidirectional algorithm                                 
+s       fribidi_devel              A free implementation of the unicode bidirectional algorithm (development files)             
+s       game_music_emu             Collection of video game music file emulators                                                
+s       gawk                       A pattern scanning and processing language                                                   
+s       gcc                        C/C++ compiler for target x86_64-unknown-haiku                                               
+s       gcc_debuginfo              C/C++ compiler for target x86_64-unknown-haiku (debug info)                                  
+s       gcc_syslibs                C/C++-runtime shared libraries, needed to execute C/C++ programs                             
+s       gcc_syslibs_devel          C/C++-runtime static libraries and C++ headers, needed to build Haiku                        
+s       gdk_pixbuf                 Bitmap rendering and loading support                                                         
+s       gettext                    GNU locale utilities                                                                         
+s       gettext_libintl            The gettext internationalization library                                                     
+s       gettext_libintl_devel      The gettext internationalization library (development files)                                 
+s       giflib                     A library for processing GIFs                                                                
+s       git                        Fast, scalable, distributed revision control system                                          
+s       glib_networking            Network-related giomodules for GLib                                                          
+s       glib2                      GLib is a cross-platform software utility library                                            
+s       glib2_devel                GLib is a cross-platform software utility library (development files)                        
+s       glslang                    OpenGL and OpenGL ES shader front end and validator                                          
+s       glu                        OpenGL Utility Library                                                                       
+s       gmp                        The GNU multiple precision arithmetic library                                                
+s       gnutls                     A TLS 1.0 and SSL 3.0 implementation for the GNU project                                     
+s       gnutls_devel               A TLS 1.0 and SSL 3.0 implementation for the GNU project (development files)                 
+s       gobject_introspection      Introspection system for GObject-based libraries                                             
+s       gperf                      GNU perfect hash function generator                                                          
+s       graphite2                  Graphite text processing engine                                                              
+s       graphite2_devel            Graphite text processing engine (development files)                                          
+s       grep                       GNU regular expression matcher                                                               
+s       gsettings_desktop_schemas  Collection of GSettings schemas for GNOME desktop                                            
+s       gst_plugins_bad            GStreamer Bad Plug-ins                                                                       
+s       gst_plugins_base           GStreamer Base Plug-ins                                                                      
+s       gst_plugins_good           GStreamer Good Plug-ins                                                                      
+s       gst_plugins_libav          GStreamer FFmpeg plugin for libav                                                            
+s       gst_plugins_ugly           GStreamer Ugly Plug-ins                                                                      
+s       gstreamer                  Open source multimedia framework                                                             
+s       gutenprint9                Suite of printer drivers                                                                     
+s       gzip                       The gzip compression utilities                                                               
+s       haiku                      The Haiku base system                                                                        
+s       haiku_datatranslators      Haiku data translators                                                                       
+s       haiku_devel                The Haiku base system development files                                                      
+s       haiku_loader               The Haiku boot loader                                                                        
+s       haiku_svg_icon_theme       Haiku icons for Qt applications                                                              
+s       haikuporter                Build packages for the Haiku operating system                                                
+s       haikuwebkit                Open source web browser engine                                                               
+s       haikuwebkit_devel          Open source web browser engine (development files)                                           
+s       harfbuzz                   An OpenType text shaping engine                                                              
+s       harfbuzz_devel             An OpenType text shaping engine (development files)                                          
+s       harfbuzz_glib              An OpenType text shaping engine (glib)                                                       
+s       iasl                       An implementation of the ACPI specification                                                  
+s       icu74                      Libraries to support Unicode and globalization                                               
+s       icu74_devel                The ICU development files                                                                    
+s       intel_wifi_firmwares       Intel WiFi firmware modules                                                                  
+s       jam                        Build tool, replacement for make                                                             
+s       jansson                    A C library for encoding, decoding and manipulating JSON data                                
+s       jansson_devel              A C library for encoding, decoding and manipulating JSON data (development files)            
+s       jasper                     Implementation of the codec specified in the JPEG-2000 Part-1 standard                       
+s       jq                         A lightweight and flexible command-line JSON processor                                       
+s       krb5                       Kerberos: The Network Authentication Protocol                                                
+s       lame                       A high quality MPEG Audio Layer III (MP3) encoder                                            
+s       lcms                       A small-footprint, speed optimized color management engine                                   
+s       less                       A free, open-source file pager                                                               
+s       libarchive                 C library and tools for working with many archive formats                                    
+s       libass                     Library for SSA/ASS subtitles rendering                                                      
+s       libavif1.0                 Library for encoding and decoding .avif files                                                
+s       libbluray                  Library for playback of Blu-ray movies                                                       
+s       libcddb                    CDDB access library                                                                          
+s       libcdio                    A library to encapsulate CD-ROM reading and control                                          
+s       libcuefile                 Cue File library from Musepack                                                               
+s       libdatachannel             C/C++ WebRTC network library                                                                 
+s       libdatachannel_devel       C/C++ WebRTC network library (development files)                                             
+s       libdca                     A free DTS Coherent Acoustics decoder                                                        
+s       libdvbpsi                  Library for MPEG TS/DVB PSI tables decoding and generation                                   
+s       libdvdcss                  A library to access DVDs                                                                     
+s       libdvdnav                  DVD navigation library                                                                       
+s       libdvdread                 A simple foundation for reading DVD video disks                                              
+s       libedit                    A BSD licensed replacement for the GNU readline library                                      
+s       libelf                     ELF object file access library                                                               
+s       libelf_devel               ELF object file access library (development files)                                           
+s       libevent                   An event notification library                                                                
+s       libexecinfo                Library for inspecting a program's backtrace                                                 
+s       libexecinfo_devel          Library for inspecting a program's backtrace (development files)                             
+s       libffi                     A portable, high level programming interface                                                 
+s       libffi_devel               A portable, high level programming interface (development files)                             
+s       libfmt                     Small, safe and fast formatting library                                                      
+s       libfmt_devel               Small, safe and fast formatting library (development files)                                  
+s       libgcrypt                  GNU's basic cryptographic library                                                            
+s       libgcrypt_devel            GNU's basic cryptographic library (development files)                                        
+s       libglvnd                   GL Vendor-Neutral Dispatch Library                                                           
+s       libgpg_error               A library that defines common error values                                                   
+s       libgpg_error_devel         A library that defines common error values (development files)                               
+s       libicns                    A library for the Mac OS 'icns' format                                                       
+s       libiconv                   The GNU iconv implementation to convert text encodings                                       
+s       libiconv_devel             The GNU iconv implementation to convert text encodings (development files)                   
+s       libidn2                    Internationalized Domain Names (IDN) implementation                                          
+s       libidn2_devel              Internationalized Domain Names (IDN) implementation (development files)                      
+s       libinstpatch               A library to process MIDI patch files                                                        
+s       libjpeg_turbo              MMX, SSE, and SSE2 SIMD accelerated JPEG library                                             
+s       libjpeg_turbo_devel        MMX, SSE, and SSE2 SIMD accelerated JPEG library (development files)                         
+s       libmad                     MPEG Audio Decoder library                                                                   
+s       libmms                     A common library for parsing mms:// and mmsh:// type network streams                         
+s       libmng                     Reads and writes MNG images                                                                  
+s       libmpeg2                   A library for decoding MPEG-2 and MPEG-1 video                                               
+s       libnice                    A library for establishing peer-to-peer UDP data streams                                     
+s       libnice_devel              A library for establishing peer-to-peer UDP data streams (development files)                 
+s       libogg                     Ogg multimedia container format library                                                      
+s       libogg_devel               Ogg multimedia container format library (development files)                                  
+s       libopenmpt                 Audio module tracker formerly known as ModPlug Tracker                                       
+s       libpcap                    A system-independent interface for user-level packet capture                                 
+s       libpcre                    Perl5 Compatible Regular Expressions                                                         
+s       libpcre2                   Perl5 Compatible Regular Expressions                                                         
+s       libpcre2_devel             Perl5 Compatible Regular Expressions (development files)                                     
+s       libpng16                   Portable Network Graphics library                                                            
+s       libpng16_devel             Portable Network Graphics library (development files)                                        
+s       libproxy                   Library for automatic proxy configuration management                                         
+s       libpsl                     A library to handle the Public Suffix List                                                   
+s       libraw                     Library for reading and processing of RAW digicam images                                     
+s       libreplaygain              Replay Gain library from Musepack                                                            
+s       libsamplerate              Samplerate converter for audio                                                               
+s       libsdl                     A cross-platform media development library                                                   
+s       libsdl2                    Simple Direct Media Layer 2.0                                                                
+s       libsdl2_devel              Simple Direct Media Layer 2.0 (development files)                                            
+s       libsdl3                    Simple Direct Media Layer 3.0                                                                
+s       libsdl3_devel              Simple Direct Media Layer 3.0 (development files)                                            
+s       libslirp                   A TCP-IP emulator used to provide virtual networking services                                
+s       libsndfile                 C library for reading and writing of sampled sound                                           
+s       libsoup3                   HTTP client/server library for GNOME                                                         
+s       libsrtp2                   Secure RTP (SRTP) Reference Implementation                                                   
+s       libsrtp2_devel             Secure RTP (SRTP) Reference Implementation (development files)                               
+s       libssh2                    A SSH2 library                                                                               
+s       libtasn1                   A small ASN.1 library                                                                        
+s       libtasn1_devel             A small ASN.1 library (development files)                                                    
+s       libtheora                  Theora video compression format library                                                      
+s       libtool_libltdl            The libtool libltdl library                                                                  
+s       libunibreak                Line and word breaking library                                                               
+s       libunistring               A library for manipulating Unicode strings                                                   
+s       libupnp                    Portable SDK for UPnP* Devices                                                               
+s       libusb                     A library providing generic access to USB devices                                            
+s       libuv                      Cross-platform asynchronous I/O                                                              
+s       libvorbis                  Ogg Vorbis audio compression format library                                                  
+s       libvorbis_devel            Ogg Vorbis audio compression format library (development files)                              
+s       libvpx                     WebM VP8/VP9 video codec library                                                             
+s       libvpx1.16                 WebM VP8/VP9 video codec library                                                             
+s       libwebp                    A library for encoding and decoding WebP image files                                         
+s       libxkbcommon               Keymap handling library for toolkits and window systems                                      
+s       libxkbcommon_devel         Keymap handling library for toolkits and window systems (development files)                  
+s       libxml2                    The XML C parser and toolkit of Gnome                                                        
+s       libxml2_devel              The XML C parser and toolkit of Gnome (development files)                                    
+s       libxslt                    The XSLT C library of Gnome                                                                  
+s       libyaml                    A C library for parsing and emitting YAML                                                    
+s       libzip                     A C library for reading, creating, and modifying zip archives                                
+s       libzip_devel               A C library for reading, creating, and modifying zip archives (development files)            
+s       llvm12_libs                Modular and reuseable compiler and toolchain technologies                                    
+s       llvm12_libunwind           LLVM Unwinder - libunwind                                                                    
+s       llvm23                     Modular and reuseable compiler and toolchain technologies                                    
+s       llvm23_clang               Modular and reuseable compiler and toolchain technologies                                    
+s       llvm23_libs                Modular and reuseable compiler and toolchain technologies                                    
+s       llvm23_lld                 Modular and reuseable compiler and toolchain technologies                                    
+s       lua5.2                     A powerful, fast, light-weight, embeddable scripting language                                
+s       luajit                     A Just-In-Time Compiler (JIT) for the Lua programming language                               
+s       luajit_devel               A Just-In-Time Compiler (JIT) for the Lua programming language (development files)           
+s       lzo                        A portable lossless data compression library                                                 
+s       m4                         The GNU macro processor                                                                      
+s       make                       Standard tool to compile source trees                                                        
+s       makefile_engine            The Makefile engine                                                                          
+s       mako                       Hyperfast and lightweight templating for the Python platform                                 
+s       mandoc                     A suite of tools compiling mdoc from the OpenBSD project                                     
+s       mbedtls3                   Open source, portable, easy to use, readable and flexible SSL library                        
+s       mbedtls3_devel             Open source, portable, easy to use, readable and flexible SSL library (development files)    
+s       media_helpers              A lightweight C++ library that simplifies working with the MediaKit API                      
+s       mesa                       Multi-platform GL implementation                                                             
+s       mesa_devel                 Multi-platform GL implementation (development files)                                         
+s       mesa_swpipe                The Mesa LLVM enhanced Gallium software pipe renderer                                        
+s       meson                      A High productivity build system                                                             
+s       minizip                    Mini zip and unzip based on zlib                                                             
+s       mkdepend                   Makefile dependency generator                                                                
+s       mpc                        Arithmetics of complex numbers with arbitrarily high precision                               
+s       mpfr                       Multiple-precision floating-point computations with correct rounding                         
+s       mpg123                     A fast console MPEG audio player and decoder library                                         
+s       musepack_tools             Musepack SV8 libraries and utilities                                                         
+s       nano                       Pico clone with more functionality under the GPL license                                     
+s       nasm                       The NASM assembler                                                                           
+s       ncurses6                   New curses library                                                                           
+s       netcat                     A utility to read and write to network connections                                           
+s       nettle                     Low-level cryptographic library                                                              
+s       nettle_devel               Low-level cryptographic library (development files)                                          
+s       nghttp2                    HTTP/2 C Library                                                                             
+s       ninja                      A small build system similar to make                                                         
+s       nlohmann_json              JSON for Modern C++                                                                          
+s       nodejs20                   A JavaScript runtime built on Chrome's V8 Engine                                             
+s       nodejs24                   A JavaScript runtime built on Chrome's V8 Engine                                             
+s       noto                       The Noto font                                                                                
+s       noto_emoji                 The Noto emoji font                                                                          
+s       noto_emoji_color           The Noto emoji colorfont                                                                     
+s       noto_sans_cjk_jp           The Noto font for CJK languages (default Japanese)                                           
+s       npm                        A JavaScript package manager                                                                 
+s       nspr                       A platform abstraction library                                                               
+s       nspr_devel                 A platform abstraction library (development files)                                           
+s       nss                        Mozilla's library that implements PKI support                                                
+s       nss_devel                  Mozilla's library that implements PKI support (development files)                            
+s       oniguruma                  A regular expression library                                                                 
+s       openal                     A software implementation of the OpenAL 3D audio API                                         
+s       openal_devel               A software implementation of the OpenAL 3D audio API (development files)                     
+s       openjpeg                   An open-source C-Library for JPEG 2000                                                       
+s       opensound                  Open Sound System audio architecture                                                         
+s       openssh                    Secure Shell client and server (remote login program)                                        
+s       openssl3                   Full-strength general purpose cryptography library (with SSL/TLS)                            
+s       openssl3_devel             Full-strength general purpose cryptography library (with SSL/TLS) (development files)        
+s       openssl3_man               Manual pages for openssl 3.5.9                                                               
+s       opus                       The interactive audio codec Opus                                                             
+s       opus_devel                 The interactive audio codec Opus (development files)                                         
+s       opusfile                   Library to seek, decode, and playback Opus streams                                           
+s       opusfile_devel             Library to seek, decode, and playback Opus streams (development files)                       
+s       orc                        The Oil Runtime Compiler                                                                     
+s       p7zip                      7-zip file compression program                                                               
+s       p11_kit                    Provides a way to load and enumerate PKCS#11 modules                                         
+s       p11_kit_devel              Provides a way to load and enumerate PKCS#11 modules (development files)                     
+s       packaging                  Core utilities for Python packages                                                           
+s       pango                      Open-source library for layout and rendering of i18n text                                    
+s       pango_devel                Open-source library for layout and rendering of i18n text (development files)                
+s       patch                      Utility to apply diffs to files                                                              
+s       pe                         A programmer's editor                                                                        
+s       perl                       Larry Wall's Practical Extraction and Report Language                                        
+s       pixman                     A pixel-manipulation library for X and cairo                                                 
+s       pixman_devel               A pixel-manipulation library for X and cairo (development files)                             
+s       pkgconfig                  Helper tool for compiling applications and libraries                                         
+s       plog                       Portable, simple and extensible C++ logging library                                          
+s       portaudio                  Portable cross-platform audio I/O library                                                    
+s       python3.12                 An interpreted, interactive, object-oriented programming language                            
+s       python3.14                 An interpreted, interactive, object-oriented programming language                            
+s       pyyaml                     YAML parser and emitter for Python                                                           
+s       qemu                       A generic and open source machine emulator and virtualizer                                   
+s       qemu_x86                   A generic and open source machine emulator and virtualizer                                   
+s       qsystray                   Deskbar shelf helper for Qt applications                                                     
+s       qt5                        A comprehensive C++ application development framework                                        
+s       qt6_base                   A cross-platform application and UI framework                                                
+s       qt6_base_devel             A cross-platform application and UI framework (development files)                            
+s       qt6_declarative            Classes for QML and JavaScript languages                                                     
+s       qt6_imageformats           Plugins for additional image formats: TIFF, MNG, TGA, WBMP                                   
+s       qt6_svg                    Classes for displaying the contents of SVG files                                             
+s       qt6_svg_devel              Classes for displaying the contents of SVG files (development files)                         
+s       qt6_tools                  A cross-platform application and UI framework (Development Tools, QtHelp)                    
+s       qt6_tools_devel            A cross-platform application and UI framework (Development Tools, QtHelp) (development files)
+s       qt6_translations           A cross-platform application and UI framework (Translations)                                 
+s       qthaikuplugins             Haiku platform plugins for Qt5                                                               
+h       quasar                     NVIDIA GPU driver for Haiku: kernel driver, NVK Vulkan and Zink OpenGL                       
+s       ralink_wifi_firmwares      Ralink WiFi firmware modules                                                                 
+s       rav1e                      The fastest and safest AV1 encoder                                                           
+s       readline                   The GNU Readline library                                                                     
+s       realtek_wifi_firmwares     Realtek WiFi firmware modules                                                                
+s       rhash                      Utility for verifying hash sums of files                                                     
+s       rnnoise                    Recurrent neural network for audio noise reduction                                           
+s       rnnoise_devel              Recurrent neural network for audio noise reduction (development files)                       
+s       rtmpdump                   Open source command-line RTMP client                                                         
+s       rust_bin                   Modern and safe systems programming language                                                 
+s       samba                      Library bits of the samba network filesystem                                                 
+s       schroedinger               An implementation of the Dirac video codec                                                   
+s       sdl2_net                   Simple Direct Layer Net Library                                                              
+s       sdl2_net_devel             Simple Direct Layer Net Library (development files)                                          
+s       sed                        The famous stream editor                                                                     
+s       setuptools_python3.14      Most extensible Python build backend with support for C/C++ extension modules                
+s       shared_mime_info           Freedesktop MIME database specification                                                      
+s       sharutils                  Tools to code/encode shell archives                                                          
+s       snappy                     A fast compressor/decompressor                                                               
+s       sounds_community_default   Haiku's default system sounds                                                                
+s       soxr                       A high-quality audio resampling library                                                      
+s       spdlog                     Very fast, header-only/compiled, C++ logging library                                         
+s       spdlog_devel               Very fast, header-only/compiled, C++ logging library (development files)                     
+s       speex                      A free codec for speech                                                                      
+s       speex_devel                A free codec for speech (development files)                                                  
+s       speexdsp                   A patent-free, Open Source/Free Software DSP library                                         
+s       speexdsp_devel             A patent-free, Open Source/Free Software DSP library (development files)                     
+s       spirv_tools                API and commands for processing SPIR-V modules                                               
+s       spirv_tools_devel          API and commands for processing SPIR-V modules (development files)                           
+s       sqlite                     An SQL Database Engine in a C library                                                        
+s       stardew_valley_haiku       Country-life farming RPG (needs purchased game data)                                         
+s       swig                       Simplified Wrapper and Interface Generator                                                   
+s       taglib                     An audio meta-data library                                                                   
+s       taglib2                    An audio meta-data library                                                                   
+s       tar                        Saves and restores files to/from a tape or disk archive                                      
+s       tcpdump                    A tool for network monitoring and data acquisition                                           
+s       texinfo                    Standard GNU documentation format tool                                                       
+s       tiff                       A library to read/write TIFF images                                                          
+s       tinyxml2                   A small C++ XML Parser                                                                       
+s       tinyxml2_devel             A small C++ XML Parser (development files)                                                   
+s       tremor                     A fixed-point version of the Ogg Vorbis decoder (also known as libvorbisidec)                
+s       twolame                    A MPEG Audio Layer 2 encoder                                                                 
+s       unzip                      Extraction utility for zip archives                                                          
+s       usrsctp                    A portable SCTP userland stack                                                               
+s       usrsctp_devel              A portable SCTP userland stack (development files)                                           
+s       uthash                     A hash table for C structures                                                                
+s       vision                     A fast and full-featured native IRC client                                                   
+s       vlc                        The popular cross-plattform media player                                                     
+s       vlc_devel                  The popular cross-plattform media player (development files)                                 
+s       vulkan_headers             Vulkan header files and API registry                                                         
+s       vulkan_loader              Installable Client Driver (ICD) Loader for Vulkan                                            
+s       vulkan_loader_devel        Installable Client Driver (ICD) Loader for Vulkan (development files)                        
+s       wayland                    Core Wayland protocols and libraries                                                         
+s       wayland_devel              Core Wayland protocols and libraries (development files)                                     
+s       wayland_protocols          Wayland protocol development                                                                 
+s       wayland_server             In-process Wayland server                                                                    
+s       webpositive                A WebKit based web browser for Haiku                                                         
+s       wget                       A tool for downloading files from the internet                                               
+s       which                      Prints out location of specified executables that are in your PATH                           
+s       woff2                      Web Open Font Format 2 reference implementation                                              
+s       wpa_supplicant             A WPA Supplicant with support for WPA and WPA2                                               
+s       x264                       An encoder for x264 h.264/AVC                                                                
+s       x264_devel                 An encoder for x264 h.264/AVC (development files)                                            
+s       x265                       H.265/HEVC video encoder                                                                     
+s       xkeyboard_config           X keyboard configuration database                                                            
+s       xlibe                      Xlib compatibility layer for Haiku                                                           
+s       xz_utils                   Free general-purpose data compression software                                               
+s       zip                        Compression utility for zip archives                                                         
+s       zlib                       A massively spiffy yet delicately unobtrusive compression library                            
+s       zlib_devel                 The zlib development files                                                                   
+s       zstd                       Zstandard, a fast real-time compression algorithm                                            
+s       zstd_devel                 Zstandard, a fast real-time compression algorithm (development files)                        

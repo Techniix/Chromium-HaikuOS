@@ -1,0 +1,6 @@
+# Stub: Haiku has no DRM/GBM; only satisfies GN's pkg-config query.
+Name: gbm
+Description: Stub for Chromium GN on Haiku
+Version: 21.0.0
+Cflags:
+Libs:

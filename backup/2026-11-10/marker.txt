@@ -1,0 +1,1 @@
+-rw-r--r-- 1 user root 40 2026-11-05 20:31:44.885260288 -0500 /boot/home/Chromium-HaikuOS/work/chromium-156.0.8078.79/.haiku-prepared

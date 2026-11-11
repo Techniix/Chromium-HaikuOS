@@ -1,0 +1,96 @@
+# GN arguments for Chromium on Haiku (filled in by scripts/build.sh).
+# Based on FreeBSD's www/chromium GN_ARGS, adjusted for Haiku.
+
+# --- Build type ---------------------------------------------------------------
+is_debug = false
+is_official_build = false
+symbol_level = 0
+blink_symbol_level = 0
+treat_warnings_as_errors = false
+fatal_linker_warnings = false
+chrome_pgo_phase = 0
+
+# --- Toolchain: system LLVM and Rust from HaikuPorts --------------------------
+is_clang = true
+clang_base_path = "/boot/system"
+clang_use_chrome_plugins = false
+use_sysroot = false
+use_lld = true
+use_custom_libcxx = true
+# Use Haiku's own unwinder rather than building LLVM libunwind for Haiku.
+use_custom_libunwind = false
+enable_rust = true
+rust_sysroot_absolute = "/boot/system/develop/tools/rust"
+rustc_version = "rustc 1.94.1 (e408947bf 2026-03-25)"
+v8_metagen_libclang_so = "/boot/system/lib/libclang.so.23.1"
+v8_metagen_libclang_bindings_dir = "/boot/home/config/non-packaged/lib/python3.14/site-packages"
+
+# --- Memory allocator (as on FreeBSD) -----------------------------------------
+use_allocator_shim = false
+use_partition_alloc = true
+use_partition_alloc_as_malloc = false
+enable_backup_ref_ptr_support = false
+
+# --- UI: Aura/Views on Ozone/Wayland through Haiku's Wayland layer ------------
+use_aura = true
+toolkit_views = true
+ozone_platform = "wayland"
+ozone_platform_wayland = true
+ozone_platform_x11 = false
+use_system_libwayland = true
+# GLib is on for every tested desktop Linux/BSD configuration; HaikuPorts has it.
+use_glib = true
+use_gio = false
+use_gtk = false
+use_qt5 = false
+use_qt6 = false
+use_dbus = true
+use_udev = false
+use_vaapi = false
+
+# --- Services not available (yet) on Haiku ------------------------------------
+use_alsa = false
+use_pulseaudio = false
+use_cups = false
+use_kerberos = false
+rtc_use_pipewire = false
+enable_remoting = false
+enable_widevine = false
+enable_hangout_services_extension = false
+
+# --- Third-party libraries: prefer the bundled copies -------------------------
+icu_use_data_file = false
+use_bundled_fontconfig = true
+use_system_freetype = false
+use_system_harfbuzz = false
+use_system_libjpeg = false
+use_system_libffi = false
+
+# --- Media ---------------------------------------------------------------------
+proprietary_codecs = false
+ffmpeg_branding = "Chromium"
+
+# --- Haiku: no clang modules (no /usr/include), no ATK/AT-SPI ---------------
+use_clang_modules = false
+use_wayland_gbm = false
+
+# --- Haiku first bring-up: no Vulkan/WebGPU/SwiftShader/XR ---
+enable_vulkan = false
+enable_swiftshader_vulkan = false
+enable_swiftshader = false
+angle_enable_vulkan = false
+use_dawn = false
+build_dawn_tests = false
+enable_openxr = false
+dcheck_always_on = false
+angle_shared_libvulkan = false
+skia_use_dawn = false
+dawn_enable_vulkan = false
+dawn_enable_vulkan_loader = false
+dawn_enable_vulkan_validation_layers = false
+dawn_use_swiftshader = false
+use_on_device_model_service = false
+webnn_use_litert = false
+use_libpci = false
+v8_use_metagen_instance_types = false
+angle_enable_wgpu = false

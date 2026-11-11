@@ -1,0 +1,6 @@
+#!/bin/sh
+# haiku-tsc-wrapper: run the JS TypeScript compiler, emit even on type errors.
+"/boot/home/config/non-packaged/lib/node_modules/typescript/bin/tsc" "$@" --noEmitOnError false
+rc=$?
+[ $rc -eq 0 ] || echo "haiku-tsc-wrapper: ignoring tsc exit $rc (TypeScript version skew)" >&2
+exit 0

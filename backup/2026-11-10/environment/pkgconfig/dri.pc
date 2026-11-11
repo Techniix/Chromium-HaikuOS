@@ -1,0 +1,7 @@
+# Stub: Haiku's Mesa has no DRI drivers; Chromium only reads this path.
+dridriverdir=/boot/system/lib/dri
+Name: dri
+Description: Stub for Chromium GN on Haiku
+Version: 21.0.0
+Cflags:
+Libs:

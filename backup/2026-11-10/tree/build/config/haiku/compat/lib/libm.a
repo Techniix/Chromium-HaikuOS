@@ -1,0 +1,4 @@
+/* Haiku: libm is part of libroot. Pull in libgnu (*_getaffinity), the
+   Chromium-HaikuOS helpers (__cxa_thread_atexit, Media Kit audio shim) and
+   the Haiku kits the shim uses. pass 12 + 13 + 16 */
+INPUT(AS_NEEDED(-lgnu) -lhaikucompat AS_NEEDED(-lmedia -lbe))
