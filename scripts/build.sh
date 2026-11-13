@@ -57,24 +57,40 @@ if [ -n "${EXTRA_GN_ARGS:-}" ]; then
   printf '\n# EXTRA_GN_ARGS\n%s\n' "$EXTRA_GN_ARGS" >> "$OUT/args.gn"
 fi
 
+# --- Renga check ---------------------------------------------------------------
+# This branch targets Renga (Techniix/haiku ce/main), not stock Haiku: it uses
+# Renga's epoll, eventfd, inotify, memfd_create, backtrace and
+# __cxa_thread_atexit_impl. Fail early, with a clear message, on a system that
+# lacks them instead of deep inside the link.
+GNU_HEADERS=/boot/system/develop/headers/gnu
+for h in sys/epoll.h sys/eventfd.h sys/inotify.h execinfo.h; do
+  [ -f "$GNU_HEADERS/$h" ] || {
+    echo "$GNU_HEADERS/$h is missing: this is the Renga branch, it does not" >&2
+    echo "build on stock Haiku. Use the main branch there." >&2
+    exit 1; }
+done
+grep -q memfd_create "$GNU_HEADERS/sys/mman.h" 2>/dev/null || {
+  echo "This Renga image has no memfd_create(); update it (see docs/RENGA.md)." >&2
+  exit 1; }
+
 # --- Haiku helper library -----------------------------------------------------
-# build/config/haiku/compat/lib (Haiku patch 0006/0011) holds C and C++ helpers
-# that GN cannot build: the Media Kit audio shim must be compiled against
-# Haiku's own headers and libstdc++, not Chromium's libc++. libm.a there is a
-# linker script that pulls libhaikucompat.a (and libgnu, libmedia, libbe) into
-# every link.
+# build/config/haiku/compat/lib (Haiku patch 0006/0011) holds the Media Kit
+# audio shim, which GN cannot build: it must be compiled against Haiku's own
+# headers and libstdc++, not Chromium's libc++. libm.a there is a linker script
+# that pulls libhaikucompat.a (and libmedia, libbe) into every link. On Renga
+# this is the only helper left (thread_local destructors come from libroot).
 COMPAT=$SRC/build/config/haiku/compat/lib
 if [ ! -f "$COMPAT/libhaikucompat.a" ] ||
-   [ "$COMPAT/haiku_cxa_thread_atexit.c" -nt "$COMPAT/libhaikucompat.a" ] ||
-   [ "$COMPAT/haiku_media_audio.cpp" -nt "$COMPAT/libhaikucompat.a" ]; then
+   [ "$COMPAT/haiku_media_audio.cpp" -nt "$COMPAT/libhaikucompat.a" ] ||
+   [ -f "$COMPAT/haiku_cxa_thread_atexit.o" ]; then
   echo "==> Building libhaikucompat.a"
   [ -n "${SYS_CXX:-}" ] || { echo "No system C++ compiler (g++) for the Media Kit shim." >&2; exit 1; }
   ( cd "$COMPAT"
-    "$CLANG" -fPIC -O2 -c haiku_cxa_thread_atexit.c -o haiku_cxa_thread_atexit.o
+    rm -f haiku_cxa_thread_atexit.o   # left over from a stock-Haiku build
     "$SYS_CXX" -fPIC -O2 -fno-exceptions -fno-rtti -fno-sized-deallocation \
         -c haiku_media_audio.cpp -o haiku_media_audio.o
     rm -f libhaikucompat.a
-    "$LLVM_AR" rcs libhaikucompat.a haiku_cxa_thread_atexit.o haiku_media_audio.o )
+    "$LLVM_AR" rcs libhaikucompat.a haiku_media_audio.o )
 fi
 
 # --- Pregenerated Tint sources -----------------------------------------------

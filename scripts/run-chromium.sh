@@ -31,13 +31,12 @@ exec "$OUT/chrome" \
   --disable-gpu-compositing \
   --disable-features=Vulkan \
   --password-store=basic \
-  --disable-quic \
   --user-data-dir="$PROFILE" \
   "${FIRST_RUN[@]}" \
   "$@"
 
 # Why each flag:
-#   --no-sandbox            Haiku has no kernel sandbox; the shared FreeBSD
+#   --no-sandbox            no kernel sandbox yet (Renga phase G); the shared FreeBSD
 #                           SandboxLinux is a no-op without this anyway.
 #   --ozone-platform=wayland  windows go through Haiku's Wayland layer.
 #   --disable-gpu*          that layer has no EGL/dma-buf yet: draw with
@@ -45,7 +44,7 @@ exec "$OUT/chrome" \
 #   --no-zygote             the zygote (fork server) depends on the Linux
 #                           sandbox; processes are launched directly.
 #   --password-store=basic  no keyring/D-Bus on Haiku.
-#   --disable-quic          stock Haiku refuses sendmsg() with control
-#                           messages on UDP sockets (EOPNOTSUPP), so QUIC
-#                           requests fail; HTTP/2 over TCP is used instead.
+#   (no --disable-quic)     Renga accepts sendmsg() with control messages
+#                           and the ECN/PKTINFO options QUIC uses; pass
+#                           --disable-quic yourself to compare with HTTP/2.
 #   --user-data-dir         keep the profile in Haiku's settings directory.

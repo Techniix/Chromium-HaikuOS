@@ -4,64 +4,41 @@ Subject: [PATCH] net: Haiku socket options, errno values and peer credentials
 - base/net_errors_posix.cc: several POSIX error names used in
   MapSystemError() are not defined by Haiku; every case is guarded with
   #ifdef.
-- socket/udp_socket_posix.cc: Haiku has no IPV6_TCLASS,
-  IPV6_RECVTCLASS or SO_TIMESTAMP; define them as option numbers that
-  make setsockopt() fail cleanly (so the callers' existing error paths
-  run) and never match a received control message. Haiku has only
-  struct ip_mreq; provide Linux's ip_mreqn layout. recvmmsg() is not
-  used on Haiku.
-- socket/unix_domain_server_socket_posix.cc,
-  components/named_mojo_ipc_server/connection_info.h: no getpeereid()
-  and no struct ucred; use SO_PEERCRED where the kernel has it, and fail
-  the credential check cleanly otherwise.
+- socket/udp_socket_posix.cc: Renga has no SO_TIMESTAMP
+  (RENGA-REQUESTS.md R-4); define it as an option number that makes
+  setsockopt() fail cleanly and never matches a received control message,
+  so Chromium takes the receive time itself. Haiku has only struct
+  ip_mreq; provide Linux's ip_mreqn layout (RENGA-REQUESTS.md R-5).
+  recvmmsg() (Renga's libnetwork) is used as on Linux and the BSDs.
+- components/named_mojo_ipc_server/connection_info.h: Haiku has no
+  <sys/ucred.h>; struct ucred comes from Renga's <sys/socket.h>.
+  getpeereid() (Renga's libbsd) is used unchanged in
+  unix_domain_server_socket_posix.cc.
 - dns/address_sorter_posix.cc: the BSD path reads IPv6 address flags
   with the SIOCGIFAFLAG_IN6 ioctl, which Haiku does not have; Haiku takes
   the generic path.
-- third_party/webrtc/rtc_base/physical_socket_server.cc: same option
-  stubs as UDPSocketPosix.
+- third_party/webrtc/rtc_base/physical_socket_server.cc: same
+  SO_TIMESTAMP fallback as UDPSocketPosix.
 
-Known limitation: QUIC (HTTP/3) fails on stock Haiku because sendmsg()
-with control messages is refused with EOPNOTSUPP on UDP sockets. Run with
---disable-quic (scripts/run-chromium.sh does).
+QUIC: Renga accepts sendmsg() with control messages on UDP sockets and
+provides the ECN and packet-info options QUIC uses, so this branch no
+longer runs with --disable-quic. See docs/RENGA.md for the test result.
 ---
 diff --git a/components/named_mojo_ipc_server/connection_info.h b/components/named_mojo_ipc_server/connection_info.h
-index cefc83a..fa6c5fe 100644
+index cefc83a..1934675 100644
 --- a/components/named_mojo_ipc_server/connection_info.h
 +++ b/components/named_mojo_ipc_server/connection_info.h
-@@ -16,12 +16,32 @@
+@@ -16,7 +16,9 @@
  #elif BUILDFLAG(IS_MAC)
  #include <bsm/libbsm.h>
  #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD)
 +#if !BUILDFLAG(IS_HAIKU)
  #include <sys/ucred.h>
 +#endif
-+#include <sys/socket.h>
  #include <sys/socket.h>
  #endif
  
-+#if BUILDFLAG(IS_HAIKU)
-+#include <sys/types.h>
-+#include <sys/socket.h>
-+#if !defined(SO_PEERCRED)
-+#define SO_PEERCRED (-1)  // getsockopt() fails cleanly
-+#endif
-+#endif
-+
- namespace named_mojo_ipc_server {
- 
-+#if BUILDFLAG(IS_HAIKU)
-+// Haiku: no struct ucred in its headers; same layout as SO_PEERCRED's.
-+struct ucred {
-+  pid_t pid;
-+  uid_t uid;
-+  gid_t gid;
-+};
-+#endif
-+
- // ConnectionInfo encapsulates information useful for verifying a potential
- // endpoint.
- struct ConnectionInfo {
-@@ -33,7 +53,7 @@ struct ConnectionInfo {
+@@ -33,7 +35,7 @@ struct ConnectionInfo {
    base::ProcessId pid{};
  #if BUILDFLAG(IS_MAC)
    audit_token_t audit_token{};
@@ -292,22 +269,17 @@ index 80b35bb..fea29f4 100644
    // Socket for ioctl.
    int ioctl_socket = socket(AF_INET6, SOCK_DGRAM, 0);
 diff --git a/net/socket/udp_socket_posix.cc b/net/socket/udp_socket_posix.cc
-index 4eb2d73..20bf2cd 100644
+index 4eb2d73..8621952 100644
 --- a/net/socket/udp_socket_posix.cc
 +++ b/net/socket/udp_socket_posix.cc
-@@ -84,6 +84,36 @@
+@@ -84,6 +84,31 @@
  #define CMSG_ALIGN(n) _ALIGN(n)
  #endif
  
 +#if defined(__HAIKU__)
-+// Haiku has no IPv6 traffic class or socket timestamps. Unknown option
-+// numbers make those setsockopt()s fail cleanly; the cmsg checks never match.
-+#ifndef IPV6_TCLASS
-+#define IPV6_TCLASS (-1)
-+#endif
-+#ifndef IPV6_RECVTCLASS
-+#define IPV6_RECVTCLASS (-2)
-+#endif
++// Renga has no SO_TIMESTAMP yet (RENGA-REQUESTS.md R-4). An unknown option
++// number makes the setsockopt() fail cleanly and the cmsg check never match;
++// Chromium then falls back to taking the receive time itself.
 +#ifndef SO_TIMESTAMP
 +#define SO_TIMESTAMP (-3)
 +#endif
@@ -332,69 +304,18 @@ index 4eb2d73..20bf2cd 100644
  namespace net {
  
  namespace {
-@@ -1184,7 +1214,7 @@ base::expected<DatagramsMetadata, Error> UDPSocketPosix::InternalReadMultiple(
-   if (socket_ == kInvalidSocket) {
-     return base::unexpected(ERR_SOCKET_NOT_CONNECTED);
-   }
--#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
-+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_BSD)  // Haiku: no recvmmsg
-   if (gro_status_ == GroStatus::kEnabled) {
-     return InternalReadMultipleWithGro(buffer, buf_len, maximum_packet_size);
-   }
-@@ -1195,7 +1225,7 @@ base::expected<DatagramsMetadata, Error> UDPSocketPosix::InternalReadMultiple(
- #endif
- }
- 
--#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
-+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_BSD)  // Haiku: no recvmmsg
- base::expected<DatagramsMetadata, Error> UDPSocketPosix::InternalRecvMmsg(
-     IOBuffer* buffer,
-     size_t num_messages,
-diff --git a/net/socket/unix_domain_server_socket_posix.cc b/net/socket/unix_domain_server_socket_posix.cc
-index 4cb79bd..918ddf3 100644
---- a/net/socket/unix_domain_server_socket_posix.cc
-+++ b/net/socket/unix_domain_server_socket_posix.cc
-@@ -46,6 +46,23 @@ bool UnixDomainServerSocket::GetPeerCredentials(SocketDescriptor socket,
-   credentials->user_id = user_cred.uid;
-   credentials->group_id = user_cred.gid;
-   return true;
-+#elif BUILDFLAG(IS_HAIKU)
-+  // Haiku: no getpeereid(); use SO_PEERCRED where the kernel has it.
-+#if defined(SO_PEERCRED)
-+  struct {
-+    pid_t pid;
-+    uid_t uid;
-+    gid_t gid;
-+  } user_cred;
-+  socklen_t len = sizeof(user_cred);
-+  if (getsockopt(socket, SOL_SOCKET, SO_PEERCRED, &user_cred, &len) < 0)
-+    return false;
-+  credentials->user_id = user_cred.uid;
-+  credentials->group_id = user_cred.gid;
-+  return true;
-+#else
-+  return false;
-+#endif
- #else
-   return getpeereid(
-       socket, &credentials->user_id, &credentials->group_id) == 0;
 diff --git a/third_party/webrtc/rtc_base/physical_socket_server.cc b/third_party/webrtc/rtc_base/physical_socket_server.cc
-index c562c33..0e56e9e 100644
+index c562c33..a2edf30 100644
 --- a/third_party/webrtc/rtc_base/physical_socket_server.cc
 +++ b/third_party/webrtc/rtc_base/physical_socket_server.cc
-@@ -93,6 +93,23 @@ typedef char* SockOptArg;
+@@ -93,6 +93,18 @@ typedef char* SockOptArg;
  #endif  // !defined(EPOLLRDHUP)
  #endif  // defined(WEBRTC_LINUX)
  
 +#if defined(__HAIKU__)
-+// Haiku has no IPv6 traffic class or socket timestamps. Unknown option
-+// numbers make those setsockopt()s fail cleanly; the cmsg checks never match.
-+#ifndef IPV6_TCLASS
-+#define IPV6_TCLASS (-1)
-+#endif
-+#ifndef IPV6_RECVTCLASS
-+#define IPV6_RECVTCLASS (-2)
-+#endif
++// Renga has no SO_TIMESTAMP yet (RENGA-REQUESTS.md R-4). An unknown option
++// number makes the setsockopt() fail cleanly and the cmsg check never match;
++// Chromium then falls back to taking the receive time itself.
 +#ifndef SO_TIMESTAMP
 +#define SO_TIMESTAMP (-3)
 +#endif

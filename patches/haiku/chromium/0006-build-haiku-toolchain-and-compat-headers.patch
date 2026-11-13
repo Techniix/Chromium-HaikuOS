@@ -2,9 +2,11 @@ From: Chromium-HaikuOS contributors
 Subject: [PATCH] build: Haiku toolchain fixes and compatibility headers
 
 Applies after the FreeBSD 156.0.8078.79 patches, tools/haikuify.py and
-patches 0001-0005. These are the build-system changes found while bringing
-the first full `chrome` build up on Haiku (R1/beta6 development, x86_64,
-Clang 23).
+patches 0001, 0002, 0004 and 0005. These are the build-system changes
+found while bringing the first full `chrome` build up on Haiku (R1/beta6
+development, x86_64, Clang 23), reduced for Renga (the Haiku fork,
+Techniix/haiku ce/main), which provides the Linux interfaces that stock
+Haiku needed stubs or helpers for.
 
 build/config/haiku/BUILD.gn
   - defines: _LIBCPP_PROVIDES_DEFAULT_RUNE_TABLE (libc++ has no Haiku
@@ -26,24 +28,24 @@ build/config/haiku/BUILD.gn
     clang_first/stdatomic.h is Clang's own header with the
     __has_include_next(<stdatomic.h>) branch disabled, so C11 atomics do
     not fall through to GCC's version.
+  - libgnu is linked into every target. Renga's Linux interfaces (epoll,
+    eventfd, inotify, memfd_create, backtrace, getauxval, getdents64, ...)
+    are there, with their headers in the gnu header directory, which the
+    Haiku Clang driver already searches (_GNU_SOURCE is defined).
+    getpeereid() is in libbsd, which patch 0001 already links.
   - compat/lib is added to the library search path. It holds empty
     libdl/librt/libpthread archives (these live in libroot on Haiku, but
     Linux build files name them) and libm.a, which is a linker script:
-    libm is part of libroot too, and the script also pulls in libgnu
-    (sched_getaffinity, pthread_getaffinity_np) and libhaikucompat.a
-    (built by scripts/build.sh from the sources in compat/lib).
-  - compat/lib/haiku_cxa_thread_atexit.c: __cxa_thread_atexit for C++
-    thread_local objects with destructors. Haiku's libroot does not
-    provide it and Chromium's libc++abi build leaves it out on this
-    target. Destructors run at thread exit through a pthread key; like
-    libc++abi's own fallback, nothing runs for the main thread at exit().
+    libm is part of libroot too, and the script pulls in libhaikucompat.a
+    (the Media Kit audio shim of patch 0011, built by scripts/build.sh)
+    with libmedia and libbe. Renga has sched_getaffinity() and
+    pthread_getaffinity_np() in libroot, so the stock-Haiku script's
+    AS_NEEDED(-lgnu) is gone.
 
 build/config/haiku/compat/*: header stubs for Linux-only includes that
 are reached unconditionally: <endian.h> and <sys/endian.h> (byte-order
-macros on compiler builtins), <sys/syscall.h>, <sys/auxv.h>,
-<sys/sysmacros.h> (DRM code only), <sys/eventfd.h> (eventfd() fails with
-ENOSYS; only DRM syncobj code calls it and that protocol is never
-offered), <net/if_arp.h> (ARPHRD_* mapped to IFT_ETHER),
+macros on compiler builtins), <sys/syscall.h>,
+<sys/sysmacros.h> (DRM code only), <net/if_arp.h> (ARPHRD_* mapped to IFT_ETHER),
 <linux/input.h> with linux/input-event-codes.h (the Linux UAPI header,
 GPL-2.0 WITH Linux-syscall-note, used only for key code numbers by the
 Wayland keyboard code) and linux/haiku_ioc.h (_IO/_IOR/_IOW encodings
@@ -58,8 +60,13 @@ build/config/ui.gni: no ATK/AT-SPI on Haiku.
 BUILD.gn: //build/modules (Clang modules over /usr/include) is left out
 of gn_all; Haiku has no /usr/include.
 
-buildtools/third_party/libc++abi: no futex on Haiku, use the generic
-mutex/condition variable implementation.
+buildtools/third_party/libc++abi: no futex on Haiku (Renga roadmap
+F-49), use the generic mutex/condition variable implementation. Renga's
+libroot provides __cxa_thread_atexit_impl() (thread_local destructors,
+including the main thread's at exit()), so cxa_thread_atexit.cpp is built
+with HAVE___CXA_THREAD_ATEXIT_IMPL and its __cxa_thread_atexit() entry
+point is enabled for __HAIKU__ (third_party/libc++abi). This replaces the
+stock-Haiku compat/lib/haiku_cxa_thread_atexit.c helper.
 
 third_party/typescript/tsgo.gni, devtools typescript_vars.gni: treat a
 Haiku host like Linux. On Haiku the "tsgo" binary is a wrapper around the
@@ -89,10 +96,10 @@ index 3f53c0f..3940386 100644
        "//components:components_unittests",
        "//components/gwp_asan:gwp_asan_unittests",
 diff --git a/build/config/haiku/BUILD.gn b/build/config/haiku/BUILD.gn
-index 5cb5066..4ce001e 100644
+index 5cb5066..430b475 100644
 --- a/build/config/haiku/BUILD.gn
 +++ b/build/config/haiku/BUILD.gn
-@@ -13,17 +13,50 @@ config("compiler") {
+@@ -13,17 +13,57 @@ config("compiler") {
      # pipe2) behind these feature macros.
      "_DEFAULT_SOURCE",
      "_GNU_SOURCE",
@@ -139,6 +146,13 @@ index 5cb5066..4ce001e 100644
 +  cflags_objc = cflags_c
 +  cflags_objcc = cflags_cc
 +  ldflags = [ "-L" + rebase_path("compat/lib", root_build_dir) ]
++
++  # Renga: the Linux interfaces Chromium uses (epoll, eventfd, inotify,
++  # memfd_create, backtrace, getdents64, ...) live in libgnu, with their
++  # headers in the gnu header directory that the Haiku Clang driver already
++  # searches. Link it everywhere, as Linux links these from libc.
++  # (libbsd, with getpeereid(), is in //build/config:default_libs.)
++  libs = [ "gnu" ]
 +
    # libroot (libc, libm, pthreads, libdl) is linked implicitly by the Haiku
    # Clang driver. libnetwork is added in //build/config:default_libs.
@@ -427,65 +441,6 @@ index 0000000..eb999e5
 +#undef toupper
 +#undef isascii
 +#undef toascii
-diff --git a/build/config/haiku/compat/lib/haiku_cxa_thread_atexit.c b/build/config/haiku/compat/lib/haiku_cxa_thread_atexit.c
-new file mode 100644
-index 0000000..b9ee440
---- /dev/null
-+++ b/build/config/haiku/compat/lib/haiku_cxa_thread_atexit.c
-@@ -0,0 +1,53 @@
-+/* Chromium-HaikuOS: __cxa_thread_atexit for thread_local objects with
-+ * destructors. Haiku's libroot does not provide it and Chromium's
-+ * libc++abi build leaves it out on this target. Destructors registered on
-+ * a thread run (newest first) when that thread exits, through a pthread
-+ * key destructor. As with libc++abi's fallback, destructors registered on
-+ * the main thread are not run at process exit. */
-+#include <pthread.h>
-+#include <stdlib.h>
-+
-+typedef void (*haiku_tls_dtor_fn)(void*);
-+
-+struct haiku_tls_dtor {
-+    haiku_tls_dtor_fn fn;
-+    void* obj;
-+    struct haiku_tls_dtor* next;
-+};
-+
-+static pthread_key_t g_key;
-+static pthread_once_t g_once = PTHREAD_ONCE_INIT;
-+
-+static void run_dtors(void* p)
-+{
-+    struct haiku_tls_dtor* n = (struct haiku_tls_dtor*)p;
-+    while (n != NULL) {
-+        struct haiku_tls_dtor* next = n->next;
-+        n->fn(n->obj);
-+        free(n);
-+        n = next;
-+    }
-+}
-+
-+static void make_key(void)
-+{
-+    pthread_key_create(&g_key, run_dtors);
-+}
-+
-+__attribute__((visibility("default")))
-+int __cxa_thread_atexit(haiku_tls_dtor_fn fn, void* obj, void* dso_symbol)
-+{
-+    (void)dso_symbol;
-+    pthread_once(&g_once, make_key);
-+    struct haiku_tls_dtor* n = (struct haiku_tls_dtor*)malloc(sizeof(*n));
-+    if (n == NULL)
-+        return -1;
-+    n->fn = fn;
-+    n->obj = obj;
-+    n->next = (struct haiku_tls_dtor*)pthread_getspecific(g_key);
-+    if (pthread_setspecific(g_key, n) != 0) {
-+        free(n);
-+        return -1;
-+    }
-+    return 0;
-+}
 diff --git a/build/config/haiku/compat/lib/libdl.a b/build/config/haiku/compat/lib/libdl.a
 new file mode 100644
 index 0000000..8b277f0
@@ -495,14 +450,16 @@ index 0000000..8b277f0
 +!<arch>
 diff --git a/build/config/haiku/compat/lib/libm.a b/build/config/haiku/compat/lib/libm.a
 new file mode 100644
-index 0000000..52ef938
+index 0000000..a70d1f4
 --- /dev/null
 +++ b/build/config/haiku/compat/lib/libm.a
-@@ -0,0 +1,4 @@
-+/* Haiku: libm is part of libroot. Pull in libgnu (*_getaffinity), the
-+   Chromium-HaikuOS helpers (__cxa_thread_atexit, Media Kit audio shim) and
-+   the Haiku kits the shim uses. pass 12 + 13 + 16 */
-+INPUT(AS_NEEDED(-lgnu) -lhaikucompat AS_NEEDED(-lmedia -lbe))
+@@ -0,0 +1,6 @@
++/* Haiku: libm is part of libroot. This linker script stands in for it and
++   pulls in the Chromium-HaikuOS Media Kit shim (libhaikucompat.a, built by
++   scripts/build.sh) and the Haiku kits the shim uses. Renga provides
++   sched_getaffinity() in libroot and __cxa_thread_atexit_impl(), so the
++   libgnu and thread_atexit parts of the stock-Haiku version are gone. */
++INPUT(-lhaikucompat AS_NEEDED(-lmedia -lbe))
 diff --git a/build/config/haiku/compat/lib/libpthread.a b/build/config/haiku/compat/lib/libpthread.a
 new file mode 100644
 index 0000000..8b277f0
@@ -1564,14 +1521,6 @@ index 0000000..fe34074
 +#define ARPHRD_IEEE802 IFT_ETHER
 +#endif
 +#endif
-diff --git a/build/config/haiku/compat/sys/auxv.h b/build/config/haiku/compat/sys/auxv.h
-new file mode 100644
-index 0000000..2e97bb1
---- /dev/null
-+++ b/build/config/haiku/compat/sys/auxv.h
-@@ -0,0 +1,2 @@
-+// Haiku has no <sys/auxv.h>/getauxval(). Stub for unconditional includes.
-+#pragma once
 diff --git a/build/config/haiku/compat/sys/endian.h b/build/config/haiku/compat/sys/endian.h
 new file mode 100644
 index 0000000..27709e8
@@ -1585,27 +1534,6 @@ index 0000000..27709e8
 +#define bswap16(x) __builtin_bswap16(x)
 +#define bswap32(x) __builtin_bswap32(x)
 +#define bswap64(x) __builtin_bswap64(x)
-+#endif
-diff --git a/build/config/haiku/compat/sys/eventfd.h b/build/config/haiku/compat/sys/eventfd.h
-new file mode 100644
-index 0000000..314fda7
---- /dev/null
-+++ b/build/config/haiku/compat/sys/eventfd.h
-@@ -0,0 +1,15 @@
-+// Haiku has no eventfd(). Only DRM syncobj code uses it, and that protocol
-+// is never offered on Haiku; fail cleanly if it's ever called.
-+#ifndef HAIKU_COMPAT_SYS_EVENTFD_H
-+#define HAIKU_COMPAT_SYS_EVENTFD_H
-+#include <errno.h>
-+#include <fcntl.h>
-+#include <stdint.h>
-+#define EFD_SEMAPHORE 1
-+#define EFD_CLOEXEC O_CLOEXEC
-+#define EFD_NONBLOCK O_NONBLOCK
-+typedef uint64_t eventfd_t;
-+static inline int eventfd(unsigned int initval, int flags) {
-+  (void)initval; (void)flags; errno = ENOSYS; return -1;
-+}
 +#endif
 diff --git a/build/config/haiku/compat/sys/syscall.h b/build/config/haiku/compat/sys/syscall.h
 new file mode 100644
@@ -1667,7 +1595,7 @@ index 47ae387..7d3fbd5 100644
      forward_variables_from(invoker, "*", [ "toolchain_args" ])
  
 diff --git a/buildtools/third_party/libc++abi/BUILD.gn b/buildtools/third_party/libc++abi/BUILD.gn
-index d294d23..e994b77 100644
+index d294d23..8be2ad9 100644
 --- a/buildtools/third_party/libc++abi/BUILD.gn
 +++ b/buildtools/third_party/libc++abi/BUILD.gn
 @@ -59,7 +59,7 @@ target(libcxxabi_target_type, "libc++abi") {
@@ -1679,6 +1607,19 @@ index d294d23..e994b77 100644
      defines += [ "_LIBCXXABI_USE_FUTEX" ]
    }
  
+@@ -71,6 +71,12 @@ target(libcxxabi_target_type, "libc++abi") {
+     if (is_android && android_ndk_api_level >= 23) {
+       defines += [ "HAVE___CXA_THREAD_ATEXIT_IMPL" ]
+     }
++
++    # Renga's libroot provides __cxa_thread_atexit_impl() with glibc's
++    # semantics, including destructors for the main thread at exit().
++    if (is_haiku) {
++      defines += [ "HAVE___CXA_THREAD_ATEXIT_IMPL" ]
++    }
+   }
+ 
+   configs -= [
 diff --git a/mojo/public/tools/bindings/mojom.gni b/mojo/public/tools/bindings/mojom.gni
 index c68bc17..575dc87 100644
 --- a/mojo/public/tools/bindings/mojom.gni
@@ -1728,6 +1669,26 @@ index 8d71639..463c057 100644
        libs = [ "uuid" ]
      }
    }
+diff --git a/third_party/libc++abi/src/src/cxa_thread_atexit.cpp b/third_party/libc++abi/src/src/cxa_thread_atexit.cpp
+index 402a52c..375ec31 100644
+--- a/third_party/libc++abi/src/src/cxa_thread_atexit.cpp
++++ b/third_party/libc++abi/src/src/cxa_thread_atexit.cpp
+@@ -106,7 +106,7 @@ namespace {
+ 
+ #endif // HAVE___CXA_THREAD_ATEXIT_IMPL
+ 
+-#if defined(__linux__) || defined(__Fuchsia__)
++#if defined(__linux__) || defined(__Fuchsia__) || defined(__HAIKU__)
+ extern "C" {
+ 
+   _LIBCXXABI_FUNC_VIS int __cxa_thread_atexit(Dtor dtor, void* obj, void* dso_symbol) throw() {
+@@ -142,5 +142,5 @@ extern "C" {
+ #endif // HAVE___CXA_THREAD_ATEXIT_IMPL
+   }
+ } // extern "C"
+-#endif // defined(__linux__) || defined(__Fuchsia__)
++#endif // defined(__linux__) || defined(__Fuchsia__) || defined(__HAIKU__)
+ } // namespace __cxxabiv1
 diff --git a/third_party/nasm/BUILD.gn b/third_party/nasm/BUILD.gn
 index beb9712..46ad213 100644
 --- a/third_party/nasm/BUILD.gn

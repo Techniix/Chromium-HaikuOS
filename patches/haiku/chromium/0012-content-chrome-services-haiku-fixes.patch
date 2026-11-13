@@ -1,9 +1,9 @@
 From: Chromium-HaikuOS contributors
 Subject: [PATCH] content, chrome, services: Haiku fixes for the browser build
 
-- content/browser/file_system_access/file_path_watcher: Haiku has
-  neither the inotify nor the kqueue watcher; provide the same no-op
-  backend as file_path_watcher_stub.cc (Watch() reports failure).
+- content/browser/BUILD.gn: the File System Access FilePathWatcher uses
+  the Linux inotify backend on Haiku (Renga provides inotify); the BSDs
+  keep kqueue. sandbox_ipc_linux.cc stays out on Haiku as on the BSDs.
 - content/browser/renderer_host/render_process_host_impl.cc: no
   RLIMIT_NPROC; report an unknown process limit.
 - content/services/isolated_xr_device, services/network sandbox hooks,
@@ -13,8 +13,6 @@ Subject: [PATCH] content, chrome, services: Haiku fixes for the browser build
   d_type.
 - chrome/browser/about_flags.cc: no "audio-backend" flag on Haiku (it
   selects between sndio and PulseAudio).
-- chrome/browser/notifications/notification_platform_bridge_linux.cc:
-  skip the icon-bytes path that needs memfd (MFD_CLOEXEC).
 - components/crash: crashpad's handler is not available on Haiku.
 - components/device_signals: LLADDR() returns a different pointer type.
 - components/update_client: "haiku" as the OS name.
@@ -37,19 +35,6 @@ index 5ca50ba..c70ad99 100644
      {"audio-backend",
       flag_descriptions::kAudioBackendName,
       flag_descriptions::kAudioBackendDescription, kOsLinux,
-diff --git a/chrome/browser/notifications/notification_platform_bridge_linux.cc b/chrome/browser/notifications/notification_platform_bridge_linux.cc
-index 7147ce3..e5acbb8 100644
---- a/chrome/browser/notifications/notification_platform_bridge_linux.cc
-+++ b/chrome/browser/notifications/notification_platform_bridge_linux.cc
-@@ -369,7 +369,7 @@ NotificationResources WriteNotificationResourceFiles(
-   result.has_icon = WriteImageFile(icon, dir_path.Append("icon.png"));
-   result.has_image = WriteImageFile(image, dir_path.Append("image.png"));
-   // XXX
--#if !BUILDFLAG(IS_OPENBSD)
-+#if !BUILDFLAG(IS_OPENBSD) && !BUILDFLAG(IS_HAIKU)
-   if (result.has_icon) {
-     result.icon_bytes = icon;
-     if (icon && icon->size() > 0) {
 diff --git a/components/crash/core/app/chrome_crashpad_handler.cc b/components/crash/core/app/chrome_crashpad_handler.cc
 index 9aa752e..d5e39bc 100644
 --- a/components/crash/core/app/chrome_crashpad_handler.cc
@@ -89,51 +74,26 @@ index e35f2db..fc12866 100644
  #else
  #error "unknown os"
  #endif
-diff --git a/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc b/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc
-index 08a1812..741297e 100644
---- a/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc
-+++ b/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc
-@@ -151,3 +151,40 @@ size_t FilePathWatcher::quota_limit() {
- }
+diff --git a/content/browser/BUILD.gn b/content/browser/BUILD.gn
+index ae1210b..4e79143 100644
+--- a/content/browser/BUILD.gn
++++ b/content/browser/BUILD.gn
+@@ -2522,10 +2522,14 @@ source_set("browser") {
+     deps += [ "//media/mojo/mojom" ]
+   }
  
- }  // namespace content
-+
-+// Chromium-HaikuOS: no file watching backend on Haiku yet. Same behaviour
-+// as file_path_watcher_stub.cc (Watch() reports failure).
-+#include "build/build_config.h"
-+#if BUILDFLAG(IS_HAIKU)
-+#include <limits>
-+#include <memory>
-+#include "base/notimplemented.h"
-+namespace content {
-+namespace {
-+class HaikuFilePathWatcherImpl : public FilePathWatcher::PlatformDelegate {
-+ public:
-+  HaikuFilePathWatcherImpl() = default;
-+  HaikuFilePathWatcherImpl(const HaikuFilePathWatcherImpl&) = delete;
-+  HaikuFilePathWatcherImpl& operator=(const HaikuFilePathWatcherImpl&) =
-+      delete;
-+  ~HaikuFilePathWatcherImpl() override = default;
-+
-+  bool Watch(const base::FilePath& path,
-+             Type type,
-+             const FilePathWatcher::Callback& callback) override {
-+    NOTIMPLEMENTED_LOG_ONCE();
-+    return false;
+-  if ((is_bsd || is_haiku)) {
++  if (is_bsd) {
+     sources -= [
+       "file_system_access/file_path_watcher/file_path_watcher_inotify.cc",
+       "file_system_access/file_path_watcher/file_path_watcher_inotify.h",
++    ]
 +  }
-+  void Cancel() override { set_cancelled(); }
-+};
-+}  // namespace
-+
-+FilePathWatcher::FilePathWatcher()
-+    : FilePathWatcher(std::make_unique<HaikuFilePathWatcherImpl>()) {}
-+
-+// static
-+size_t FilePathWatcher::GetQuotaLimitImpl() {
-+  return std::numeric_limits<size_t>::max();
-+}
-+}  // namespace content
-+#endif  // BUILDFLAG(IS_HAIKU)
++  if (is_bsd || is_haiku) {
++    sources -= [
+       "sandbox_ipc_linux.cc",
+       "sandbox_ipc_linux.h",
+     ]
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
 index e7cb32e..23033f5 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc

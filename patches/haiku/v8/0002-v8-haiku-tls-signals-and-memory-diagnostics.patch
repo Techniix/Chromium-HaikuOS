@@ -4,6 +4,9 @@ Subject: [PATCH] v8: Haiku TLS model, signal context and memory diagnostics
 - src/common/thread-local-storage.h: Haiku links executables with
   -shared, where the local-exec TLS model fails to link; use
   local-dynamic, as on Android.
+- src/base/debug/stack_trace_posix.cc: Renga provides <execinfo.h>, so
+  V8's own stack traces (d8, V8_Fatal without an embedder printer) use
+  backtrace() and backtrace_symbols_fd().
 - src/libsampler/sampler.cc, src/trap-handler/handler-inside-posix.h:
   Haiku's ucontext layout and signal handling, as on FreeBSD.
 - src/base/platform/platform-posix.cc (diagnostics): when DecommitPages()
@@ -29,6 +32,21 @@ index e471714..80ad138 100644
    } else {
      switch (page_freeing_mode_) {
        case PageFreeingMode::kMakeInaccessible:
+diff --git a/v8/src/base/debug/stack_trace_posix.cc b/v8/src/base/debug/stack_trace_posix.cc
+index 39fa8be..6f4fac9 100644
+--- a/v8/src/base/debug/stack_trace_posix.cc
++++ b/v8/src/base/debug/stack_trace_posix.cc
+@@ -25,7 +25,9 @@
+ #include <string>
+ #include <vector>
+ 
+-#if V8_LIBC_GLIBC || V8_LIBC_BSD || V8_LIBC_UCLIBC || V8_OS_SOLARIS
++// Renga (the Haiku fork) provides <execinfo.h> in libgnu.
++#if V8_LIBC_GLIBC || V8_LIBC_BSD || V8_LIBC_UCLIBC || V8_OS_SOLARIS || \
++    V8_OS_HAIKU
+ #define HAVE_EXECINFO_H 1
+ #endif
+ 
 diff --git a/v8/src/base/platform/platform-posix.cc b/v8/src/base/platform/platform-posix.cc
 index dbe2dd2..88c354f 100644
 --- a/v8/src/base/platform/platform-posix.cc

@@ -2,9 +2,13 @@ From: Chromium-HaikuOS contributors
 Subject: [PATCH] base: Haiku process, system, thread, path and debugger support
 
 Applies after the FreeBSD 156.0.8078.79 patches and tools/haikuify.py.
+
+Renga branch: Linux's inotify FilePathWatcher replaces the stub (Renga has
+inotify), and the /proc/self/maps based in-process symbolizer is left out
+in favour of backtrace() (see 0007 and RENGA-REQUESTS.md R-2).
 ---
 diff --git a/base/BUILD.gn b/base/BUILD.gn
-index d797bea3a9..a4212468a5 100644
+index d797bea3a9..1922065608 100644
 --- a/base/BUILD.gn
 +++ b/base/BUILD.gn
 @@ -2297,6 +2297,13 @@ component("base") {
@@ -21,16 +25,41 @@ index d797bea3a9..a4212468a5 100644
    }
  
    # iOS
-@@ -2492,6 +2499,34 @@ component("base") {
+@@ -2449,12 +2456,19 @@ component("base") {
+         "nix/xdg_util.cc",
+         "nix/xdg_util.h",
+       ]
+-      defines += [ "USE_SYMBOLIZE" ]
+-      deps += [
+-        ":dwarf_helpers",
+-        "//base/third_party/symbolize",
+-        "//base/third_party/xdg_user_dirs",
+-      ]
++      deps += [ "//base/third_party/xdg_user_dirs" ]
++
++      # The in-process symbolizer finds code through /proc/self/maps, which
++      # Renga does not have (RENGA-REQUESTS.md R-2). There, stack traces use
++      # backtrace() and backtrace_symbols() instead (HAVE_BACKTRACE in
++      # debug/stack_trace_posix.cc).
++      if (!is_haiku) {
++        defines += [ "USE_SYMBOLIZE" ]
++        deps += [
++          ":dwarf_helpers",
++          "//base/third_party/symbolize",
++        ]
++      }
+     }
+   } else {
+     if (!is_android) {
+@@ -2492,6 +2506,30 @@ component("base") {
      ]
    }
  
 +  if (is_haiku) {
-+    # Same Linux-only sources the BSD ports drop. Haiku has no inotify or
-+    # kqueue; file watching uses the stub until a node-monitor
-+    # (watch_node()) based FilePathWatcher is written.
++    # Linux-only sources that need /proc, prctl() or Linux scheduling, as the
++    # BSD ports drop them. File watching uses Linux's inotify watcher:
++    # Renga provides inotify (see RENGA-REQUESTS.md for the differences).
 +    sources -= [
-+      "files/file_path_watcher_inotify.cc",
 +      "files/scoped_file_linux.cc",
 +      "process/process_handle_linux.cc",
 +      "process/process_iterator_linux.cc",
@@ -47,10 +76,7 @@ index d797bea3a9..a4212468a5 100644
 +      "system/sys_info_linux.cc",
 +      "threading/platform_thread_linux.cc",
 +    ]
-+    sources += [
-+      "files/file_path_watcher_stub.cc",
-+      "threading/platform_thread_haiku.cc",
-+    ]
++    sources += [ "threading/platform_thread_haiku.cc" ]
 +  }
 +
    if (use_blink) {

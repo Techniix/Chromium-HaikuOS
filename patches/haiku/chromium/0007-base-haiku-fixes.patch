@@ -1,5 +1,5 @@
 From: Chromium-HaikuOS contributors
-Subject: [PATCH] base: small Haiku fixes found during the first full build
+Subject: [PATCH] base: Haiku fixes, memfd shared memory and backtrace() traces
 
 - files/file_posix.cc: Haiku has futimens() and the POSIX.1-2008
   st_atim/st_mtim/st_ctim fields, not the BSD st_*timespec names.
@@ -15,7 +15,96 @@ Subject: [PATCH] base: small Haiku fixes found during the first full build
 - process/set_process_title.cc: no setproctitle(); the team name comes
   from argv[0].
 - profiler/module_cache_posix.cc: Haiku's <elf.h> calls PF_X PF_EXECUTE.
+
+Renga (Techniix/haiku ce/main):
+
+- memory/platform_shared_memory_region_posix.cc, .h: use the Linux
+  memfd-backed region code (memfd_create() with MFD_ALLOW_SEALING and
+  MFD_NOEXEC_SEAL, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL), calling
+  Renga's libgnu memfd_create() function instead of syscall(), and
+  CreateUnsafeAnonymous() for in-process unsafe regions (also enabled in
+  mojo/core/ipcz_driver/base_shared_memory_service.cc, so renderer and
+  GPU processes create them without a broker round trip). Writable regions
+  also need a second, read-only open file description, which Linux gets
+  by reopening /proc/self/fd/N; Renga has no /proc (RENGA-REQUESTS.md
+  R-1), so for them the open() fails and Create() falls back to a file in
+  the temporary directory, as before.
+- debug/stack_trace_posix.cc: HAVE_BACKTRACE on Haiku. Stack traces use
+  backtrace() and backtrace_symbols() (demangled) outside the signal
+  handler. In the signal handler, where glibc's backtrace_symbols_fd() is
+  not safe, Renga's does not allocate, so a crash prints
+  "image(symbol+0xoffset) [address]" frames to stderr instead of bare
+  addresses. Frames in non-exported functions print as image(+0xoffset);
+  tools/symbolize-trace.py resolves them with llvm-symbolizer. (The
+  /proc/self/maps based symbolizer is left out in patch 0002.)
 ---
+diff --git a/base/debug/stack_trace_posix.cc b/base/debug/stack_trace_posix.cc
+index 52d4ec2..b535333 100644
+--- a/base/debug/stack_trace_posix.cc
++++ b/base/debug/stack_trace_posix.cc
+@@ -46,9 +46,10 @@
+ 
+ // Surprisingly, uClibc defines __GLIBC__ in some build configs, but
+ // execinfo.h and backtrace(3) are really only present in glibc and in macOS
+-// libc.
+-#if BUILDFLAG(IS_APPLE) || \
+-    (defined(__GLIBC__) && !defined(__UCLIBC__) && !defined(__AIX) && !(BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU)))
++// libc. Renga (the Haiku fork) has them in libgnu, with frames found from the
++// unwind tables and a backtrace_symbols_fd() that does not allocate.
++#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_HAIKU) || \
++    (defined(__GLIBC__) && !defined(__UCLIBC__) && !defined(__AIX) && !BUILDFLAG(IS_BSD))
+ #define HAVE_BACKTRACE
+ #include <execinfo.h>
+ #endif
+@@ -165,6 +166,13 @@ class BacktraceOutputHandler {
+  public:
+   virtual void HandleOutput(const char* output) = 0;
+ 
++#if BUILDFLAG(IS_HAIKU)
++  // The descriptor this handler writes to, or -1 if it does not write to a
++  // descriptor. Lets ProcessBacktrace() name frames inside the signal
++  // handler with Renga's non-allocating backtrace_symbols_fd().
++  virtual int OutputFileDescriptor() const { return -1; }
++#endif
++
+  protected:
+   virtual ~BacktraceOutputHandler() = default;
+ };
+@@ -309,6 +317,23 @@ void ProcessBacktrace(span<const void* const> traces,
+ #endif  // defined(HAVE_DLADDR)
+   }
+ 
++#if BUILDFLAG(IS_HAIKU)
++  // In the signal handler glibc's backtrace_symbols_fd() is not safe (it may
++  // allocate while loading libgcc), so Linux prints bare addresses there.
++  // Renga's does not allocate, so print "image(symbol+0xoffset) [address]"
++  // frames instead; frames in static functions come out as
++  // "image(+0xoffset)" for tools/symbolize-trace.py (they are not demangled
++  // here, which would need malloc).
++  if (!printed && in_signal_handler != 0 &&
++      handler->OutputFileDescriptor() >= 0 &&
++      IsValueInRangeForNumericType<int>(traces.size())) {
++    backtrace_symbols_fd(const_cast<void* const*>(traces.data()),
++                         static_cast<int>(traces.size()),
++                         handler->OutputFileDescriptor());
++    printed = true;
++  }
++#endif  // BUILDFLAG(IS_HAIKU)
++
+   if (!printed) {
+     for (const void* const trace : traces) {
+       handler->HandleOutput(" [");
+@@ -621,6 +646,10 @@ class PrintBacktraceOutputHandler : public BacktraceOutputHandler {
+     // stack dumping signal handler). NO malloc or stdio is allowed here.
+     PrintToStderr(output);
+   }
++
++#if BUILDFLAG(IS_HAIKU)
++  int OutputFileDescriptor() const override { return STDERR_FILENO; }
++#endif
+ };
+ 
+ class StreamBacktraceOutputHandler : public BacktraceOutputHandler {
 diff --git a/base/files/file_posix.cc b/base/files/file_posix.cc
 index 0298856..48c20fb 100644
 --- a/base/files/file_posix.cc
@@ -63,6 +152,124 @@ index 43fd469..9591b5e 100644
  #include "base/strings/safe_sprintf.h"
  #include "base/strings/span_printf.h"
  #include "base/strings/string_number_conversions.h"
+diff --git a/base/memory/platform_shared_memory_region.h b/base/memory/platform_shared_memory_region.h
+index 8e3b8c5..c92573b 100644
+--- a/base/memory/platform_shared_memory_region.h
++++ b/base/memory/platform_shared_memory_region.h
+@@ -117,7 +117,7 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
+   static PlatformSharedMemoryRegion CreateWritable(size_t size);
+   static PlatformSharedMemoryRegion CreateUnsafe(size_t size);
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_HAIKU)
+   // Creates a new kUnsafe region backed by an anonymous file (memfd) without
+   // touching the filesystem, so that it also works inside a sandbox whose
+   // seccomp policy allows memfd_create(2) (the baseline policy does). Unlike
+diff --git a/base/memory/platform_shared_memory_region_posix.cc b/base/memory/platform_shared_memory_region_posix.cc
+index 5482d8f..9e6a344 100644
+--- a/base/memory/platform_shared_memory_region_posix.cc
++++ b/base/memory/platform_shared_memory_region_posix.cc
+@@ -64,13 +64,24 @@ std::optional<FDAccessModeError> CheckFDAccessMode(int fd, int expected_mode) {
+   return std::nullopt;
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_HAIKU)
+ 
+ // Added in Linux 6.3; not in all sysroot headers yet.
+ #ifndef MFD_NOEXEC_SEAL
+ #define MFD_NOEXEC_SEAL 0x0008U
+ #endif
+ 
++int MemfdCreate(const char* name, unsigned int flags) {
++#if BUILDFLAG(IS_HAIKU)
++  // Renga provides memfd_create() as a libgnu function (there is no system
++  // call number to pass to syscall()). Stock Haiku has neither; there the
++  // region falls back to a file in the temporary directory.
++  return memfd_create(name, flags);
++#else
++  return static_cast<int>(syscall(__NR_memfd_create, name, flags));
++#endif
++}
++
+ // Creates the region as an anonymous memfd instead of an unlinked file in
+ // /dev/shm. This needs two to three system calls instead of seven, no path
+ // lookup and no dentry, and no up-front fallocate(): memfd pages live on the
+@@ -95,16 +106,14 @@ ScopedFDPair CreateAnonymousRegion(PlatformSharedMemoryRegion::Mode mode,
+   static std::atomic<bool> try_noexec_seal{true};
+   ScopedFD fd;
+   if (try_noexec_seal.load(std::memory_order_relaxed)) {
+-    fd.reset(static_cast<int>(
+-        syscall(__NR_memfd_create, kName,
+-                MFD_CLOEXEC | MFD_ALLOW_SEALING | MFD_NOEXEC_SEAL)));
++    fd.reset(
++        MemfdCreate(kName, MFD_CLOEXEC | MFD_ALLOW_SEALING | MFD_NOEXEC_SEAL));
+     if (!fd.is_valid() && errno == EINVAL) {
+       try_noexec_seal.store(false, std::memory_order_relaxed);
+     }
+   }
+   if (!fd.is_valid()) {
+-    fd.reset(static_cast<int>(
+-        syscall(__NR_memfd_create, kName, MFD_CLOEXEC | MFD_ALLOW_SEALING)));
++    fd.reset(MemfdCreate(kName, MFD_CLOEXEC | MFD_ALLOW_SEALING));
+   }
+   if (!fd.is_valid()) {
+     DPLOG_IF(ERROR, errno != ENOSYS) << "memfd_create";
+@@ -135,6 +144,9 @@ ScopedFDPair CreateAnonymousRegion(PlatformSharedMemoryRegion::Mode mode,
+     // CheckPlatformHandlePermissionsCorrespondToMode()). A memfd has no name,
+     // but procfs can reopen it. This is the only step that needs filesystem
+     // access; processes without it get their writable regions from a broker.
++    // Renga has no /proc yet (RENGA-REQUESTS.md R-1): the open() fails and
++    // writable regions use the file-based fallback in Create(); unsafe
++    // regions, which need no second descriptor, stay memfd-backed.
+     const std::string path =
+         StrCat({"/proc/self/fd/", NumberToString(fd.get())});
+     readonly_fd.reset(HANDLE_EINTR(open(path.c_str(), O_RDONLY | O_CLOEXEC)));
+@@ -147,7 +159,7 @@ ScopedFDPair CreateAnonymousRegion(PlatformSharedMemoryRegion::Mode mode,
+   return ScopedFDPair(std::move(fd), std::move(readonly_fd));
+ }
+ 
+-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_HAIKU)
+ 
+ }  // namespace
+ 
+@@ -261,7 +273,7 @@ bool PlatformSharedMemoryRegion::ConvertToUnsafe() {
+   return true;
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_HAIKU)
+ // static
+ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::CreateUnsafeAnonymous(
+     size_t size) {
+@@ -276,7 +288,7 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::CreateUnsafeAnonymous(
+   return PlatformSharedMemoryRegion(std::move(anonymous_region), Mode::kUnsafe,
+                                     size, UnguessableToken::Create());
+ }
+-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_HAIKU)
+ 
+ // static
+ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
+@@ -297,7 +309,7 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
+   CHECK_NE(mode, Mode::kReadOnly) << "Creating a region in read-only mode will "
+                                      "lead to this region being non-modifiable";
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_HAIKU)
+   if (!executable) {
+     ScopedFDPair anonymous_region = CreateAnonymousRegion(mode, size);
+     if (anonymous_region.fd.is_valid()) {
+@@ -306,7 +318,7 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
+     }
+     // memfd_create() is not available; fall back to a file in /dev/shm.
+   }
+-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_HAIKU)
+ 
+   // This function theoretically can block on the disk, but realistically
+   // the temporary files we create will just go into the buffer cache
 diff --git a/base/memory/protected_memory_posix.cc b/base/memory/protected_memory_posix.cc
 index 03c698d..a8e5cf9 100644
 --- a/base/memory/protected_memory_posix.cc
@@ -151,3 +358,25 @@ index 54c48a1..68aad80 100644
  #include <optional>
  #include <string_view>
  
+diff --git a/mojo/core/ipcz_driver/base_shared_memory_service.cc b/mojo/core/ipcz_driver/base_shared_memory_service.cc
+index 8c9678a..ce25b53 100644
+--- a/mojo/core/ipcz_driver/base_shared_memory_service.cc
++++ b/mojo/core/ipcz_driver/base_shared_memory_service.cc
+@@ -131,7 +131,7 @@ base::MappedReadOnlyRegion CreateReadOnlySharedMemoryRegion(
+ }
+ 
+ base::UnsafeSharedMemoryRegion CreateUnsafeSharedMemoryRegion(size_t size) {
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_HAIKU)
+   // An unsafe region never needs a read-only descriptor, and a memfd-backed
+   // one needs no filesystem access to create, so allocate it in-process when
+   // the embedder says this process's sandbox allows it (and the kernel
+@@ -147,7 +147,7 @@ base::UnsafeSharedMemoryRegion CreateUnsafeSharedMemoryRegion(size_t size) {
+     // In-process creation failed (no memfd support in the kernel, or out of
+     // descriptors or memory); fall back to asking the broker.
+   }
+-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_HAIKU)
+ 
+   auto writable_region = CreateWritableSharedMemoryRegion(size);
+   if (!writable_region.IsValid()) {
