@@ -4,6 +4,12 @@ This document explains how the port is put together, which decisions were
 made and why, what is known to be missing, and how to move it to a new
 Chromium release. The README covers building.
 
+**On the `renga` branch** the platform model, pipeline and most patches are
+the same, but Renga's Linux interfaces replace several stock-Haiku
+workarounds: patch 0003 is gone, and 0002, 0006, 0007, 0008 and 0012 are
+smaller. Where this document describes stock Haiku, [RENGA.md](RENGA.md)
+says what differs.
+
 ## Contents
 
 - [The platform model](#the-platform-model)
@@ -117,7 +123,9 @@ File watching uses the stub watcher for now. A node-monitor
 QtWebEngine port used it too. Replace it with `team_info.parent` if the
 target Haiku exposes that field.
 
-### `0003-base-message-pump-poll`
+### `0003-base-message-pump-poll` (stock Haiku only)
+
+Not on the `renga` branch, which uses the native epoll pump.
 
 Chromium's UI and I/O loops use `MessagePumpEpoll`, which also has a poll()
 mode (FreeBSD defaults to it). On Haiku, which has neither epoll nor eventfd:
@@ -164,21 +172,22 @@ patch's header lists every change and why it is needed; in short:
 | Patch | Contents |
 | --- | --- |
 | `0006-build-haiku-toolchain-and-compat-headers` | Defines and flags in `build/config/haiku`, Clang's builtin headers ahead of GCC's, stub headers for Linux-only includes (`build/config/haiku/compat`), the `compat/lib` linker search directory and its sources, toolchain fixes |
-| `0007-base-haiku-fixes` | Small `base/` fixes (stat times, rlimits, fd directory, process title, ELF names) |
-| `0008-net-haiku-socket-and-errno-fixes` | errno cases, UDP option stubs, `ip_mreqn`, peer credentials |
+| `0007-base-haiku-fixes` | Small `base/` fixes (stat times, rlimits, fd directory, process title, ELF names); on Renga, memfd shared memory and `backtrace()` stack traces |
+| `0008-net-haiku-socket-and-errno-fixes` | errno cases, the `SO_TIMESTAMP` fallback, `ip_mreqn`, `struct ucred` header |
 | `0009-third-party-haiku-fixes` | abseil, ANGLE, crashpad, Dawn (pregenerated Tint, see `docs/TINT.md`), fontconfig, perfetto, pthreadpool and others |
 | `0010-ui-wayland-haiku-window-frame-and-input` | Native Haiku window frame through the KDE server-decoration protocol, compatibility with Haiku's older libwayland, evdev key codes |
 | `0011-media-haiku-audio-and-decoder-fixes` | Media Kit audio output, the AV1 (`dav1d`) `EAGAIN` fix, capture without V4L2 |
-| `0012-content-chrome-services-haiku-fixes` | File watcher stub, sandbox declarations, Blink TLS model, small browser fixes |
+| `0012-content-chrome-services-haiku-fixes` | inotify File System Access watcher on Haiku, sandbox declarations, Blink TLS model, small browser fixes |
 | `v8/0002-v8-haiku-tls-signals-and-memory-diagnostics` | TLS model and signal context; temporary diagnostics for the "Check failed: success" renderer crash |
 
-Two helpers cannot be built by GN and are built by `scripts/build.sh` into
-`build/config/haiku/compat/lib/libhaikucompat.a`: `__cxa_thread_atexit`
-(C++ `thread_local` destructors) and the C-ABI shim around the Media Kit's
-`BSoundPlayer`, which must be compiled against Haiku's libstdc++ rather than
-Chromium's libc++. `compat/lib/libm.a` is a linker script that adds that
-library, libgnu (`sched_getaffinity`, `pthread_getaffinity_np`), libmedia
-and libbe to every link.
+One helper cannot be built by GN and is built by `scripts/build.sh` into
+`build/config/haiku/compat/lib/libhaikucompat.a`: the C-ABI shim around the
+Media Kit's `BSoundPlayer`, which must be compiled against Haiku's libstdc++
+rather than Chromium's libc++. `compat/lib/libm.a` is a linker script that
+adds that library, libmedia and libbe to every link; libgnu, which holds
+Renga's Linux interfaces, is linked from `build/config/haiku`. (On stock
+Haiku, `main` also builds a `__cxa_thread_atexit` helper and pulls libgnu in
+through the linker script for `sched_getaffinity()`.)
 
 ## Key decisions
 
@@ -233,7 +242,9 @@ system libwayland).
 ## Known limitations
 
 Status on stock Haiku (hrev60368, November 2026): `chrome` builds, runs and
-browses with the flags in `scripts/run-chromium.sh`.
+browses with the flags in `scripts/run-chromium.sh`. The table describes
+stock Haiku; on Renga, HTTP/3, file watching and crash traces are expected
+to work (see [RENGA.md](RENGA.md) for what has been tested).
 
 | Area | Limitation | Notes |
 | --- | --- | --- |
