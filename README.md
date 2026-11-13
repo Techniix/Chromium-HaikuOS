@@ -4,11 +4,14 @@ A port of the [Chromium](https://www.chromium.org/) web browser to
 [Haiku](https://www.haiku-os.org/), built natively on Haiku from the official
 Chromium release sources.
 
-**Status: pre-alpha, never built yet.** The patch series and build scripts
-are complete for a first build attempt of **Chromium 156.0.8078.79**. They
-apply cleanly to that release and have been checked end to end, but nothing
-has been compiled on Haiku yet. Expect the first builds to surface compile
-errors; [`docs/PORTING.md`](docs/PORTING.md) lists where they are most likely.
+**Status: pre-alpha.** **Chromium 156.0.8078.79** builds and runs on Haiku
+(x86_64, tested on hrev60368): it opens a native Haiku window, browses the
+web over HTTP/2, plays video (including AV1) and plays sound through the
+Media Kit. It runs without a sandbox, with software rendering and without
+HTTP/3; [`docs/PORTING.md`](docs/PORTING.md) lists the known limitations.
+
+A second target, Renga (a Haiku-based operating system that adds the Linux
+and BSD interfaces Chromium uses), is developed on the `renga` branch.
 
 ## How it works
 
@@ -58,17 +61,37 @@ scripts/run-chromium.sh work/chromium-156.0.8078.79/out/Release
 ```
 
 `detect-toolchain.sh` names the HaikuPorts package for anything missing. The
-main requirements are LLVM/Clang with lld, Rust, Python 3, Ninja, Node.js,
-gperf, `bindgen` (`cargo install bindgen-cli`), `esbuild`, the Python libclang
-bindings, and the development packages for wayland, libxkbcommon, glib, nss
-and expat.
+first successful build used these packages:
+
+```sh
+pkgman install llvm23 llvm23_clang llvm23_lld llvm23_libs rust_bin bindgen \
+    python3.14 setuptools_python3.14 ninja nasm pkgconfig gperf bison flex \
+    git nodejs24 npm gcc haiku_devel wayland wayland_devel wayland_protocols \
+    wayland_server libxkbcommon_devel glib2_devel nss_devel nspr_devel \
+    dbus_devel expat_devel cairo_devel pango_devel harfbuzz_devel \
+    fontconfig_devel freetype_devel
+```
+
+`wayland_server` is the in-process Wayland server Chromium's windows go
+through; without it Chromium exits with "Failed to connect to Wayland
+display". Install packages before starting a build, not during one: an
+update of `haiku_devel` changes the system headers' timestamps and makes
+ninja rebuild almost everything (`tools/skip-sysheader-rebuild.sh` repairs
+that).
+
+`scripts/build.sh` sets `RUSTC_BOOTSTRAP=1` (Chromium's Rust code uses
+unstable features) and adds `prebuilt/pkgconfig` to `PKG_CONFIG_PATH`: stub
+entries for three libraries Haiku does not have and GN only checks for
+(`atspi-2`, `dri`, `gbm`). If you run `ninja` yourself after `build.sh`, set
+both in your shell first, since ninja reruns `gn gen` when build files
+change.
 
 `/boot/system` is read-only on Haiku, so install npm and pip tools into your
 home directory:
 
 ```sh
 npm config set prefix ~/config/non-packaged   # bin/ is already on PATH
-npm install -g esbuild-wasm
+npm install -g esbuild-wasm typescript
 python3 -m pip install --user clang   # newest bindings work with newer libclang
 ```
 
@@ -85,6 +108,9 @@ compile step when reporting a build problem.
 | `tools/haikuify.py` | Extends FreeBSD's BSD guards to Haiku and writes the worklist |
 | `tools/probe-haiku-libc.sh` | Checks which BSD/GNU/Linux libc interfaces this Haiku provides |
 | `scripts/` | Fetch, prepare, build and run scripts, plus the GN args template |
+| `prebuilt/tint-gen.tar.gz` | Pregenerated Tint sources (their generator needs Go 1.26+), see `docs/TINT.md` |
+| `prebuilt/pkgconfig/` | Stub pkg-config entries for libraries GN asks about but Haiku lacks |
+| `tools/skip-sysheader-rebuild.sh` | Avoids a full rebuild after a system-header update |
 | `docs/PORTING.md` | Design, decisions, current gaps and how to update to a new release |
 | `docs/haikuify-report.md` | Hand-porting worklist for 156.0.8078.79 |
 

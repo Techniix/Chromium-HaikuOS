@@ -58,6 +58,10 @@ _need GIT          git          "HaikuPorts git"           git
 #   npm config set prefix ~/config/non-packaged && npm install -g esbuild-wasm
 _need ESBUILD      esbuild      "pkgman install npm; npm config set prefix ~/config/non-packaged; npm install -g esbuild-wasm" esbuild
 _want TSGO         tsgo         "" tsgo
+# Without tsgo, the JavaScript compiler is used through a wrapper:
+#   npm install -g typescript
+_want TSC          tsc          "" tsc
+_want SYS_CXX      "system C++" "" g++ c++
 _want CLANG_FORMAT clang-format "" clang-format
 
 if [ -n "${CLANG:-}" ]; then

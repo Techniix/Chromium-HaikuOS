@@ -24,7 +24,6 @@ rust_sysroot_absolute = "@RUST_SYSROOT@"
 rustc_version = "@RUSTC_VERSION@"
 v8_metagen_libclang_so = "@LIBCLANG_SO@"
 v8_metagen_libclang_bindings_dir = "@LIBCLANG_BINDINGS_DIR@"
-use_typescript_go = false
 
 # --- Memory allocator (as on FreeBSD) -----------------------------------------
 use_allocator_shim = false
@@ -45,7 +44,7 @@ use_gio = false
 use_gtk = false
 use_qt5 = false
 use_qt6 = false
-use_dbus = false
+use_dbus = true
 use_udev = false
 use_vaapi = false
 
@@ -70,3 +69,28 @@ use_system_libffi = false
 # --- Media ---------------------------------------------------------------------
 proprietary_codecs = false
 ffmpeg_branding = "Chromium"
+
+# --- Haiku: no clang modules (no /usr/include), no ATK/AT-SPI ---------------
+use_clang_modules = false
+use_wayland_gbm = false
+
+# --- Haiku first bring-up: no Vulkan/WebGPU/SwiftShader/XR ---
+enable_vulkan = false
+enable_swiftshader_vulkan = false
+enable_swiftshader = false
+angle_enable_vulkan = false
+use_dawn = false
+build_dawn_tests = false
+enable_openxr = false
+dcheck_always_on = false
+angle_shared_libvulkan = false
+skia_use_dawn = false
+dawn_enable_vulkan = false
+dawn_enable_vulkan_loader = false
+dawn_enable_vulkan_validation_layers = false
+dawn_use_swiftshader = false
+use_on_device_model_service = false
+webnn_use_litert = false
+use_libpci = false
+v8_use_metagen_instance_types = false
+angle_enable_wgpu = false

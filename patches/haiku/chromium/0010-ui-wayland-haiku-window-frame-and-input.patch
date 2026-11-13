@@ -1,0 +1,550 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] ui: Haiku native window frame, Wayland compatibility and input
+
+Haiku's in-process Wayland server (HaikuPorts wayland_server) implements
+the core protocols on top of the Haiku API, but is older than the
+protocol level Chromium 156 expects and offers a different set of
+extensions.
+
+- Native window frame. Haiku's server draws real Haiku decorations (tab,
+  close and zoom buttons, borders) when a client asks for server-side
+  decorations through the KDE server-decoration protocol; it does not
+  offer xdg-decoration. Add the org_kde_kwin_server_decoration protocol
+  target, bind its manager in WaylandConnection, use it in XdgToplevel
+  when xdg-decoration is absent (request_mode SERVER/CLIENT, mode event
+  updates decoration_mode_), report server-side decoration support from
+  OzonePlatformWayland, and default "Use system title bar and borders" to
+  on for Haiku (custom_frame_pref_default = false).
+- wayland_object.*, wayland_connection.*: Haiku's libwayland lacks the
+  wl_fixes interface (wl_registry destruction, ack of global removal);
+  those calls are compiled out on Haiku.
+- wayland_keyboard.cc: WL_KEYBOARD_KEY_STATE_REPEATED is defined for the
+  older protocol headers.
+- wayland_pointer.cc: no axis_relative_direction event in Haiku's
+  wl_pointer version.
+- events/keycodes/dom/keycode_converter.*: use the evdev key code tables
+  on Haiku as on FreeBSD (Wayland sends evdev codes).
+- gfx/linux/dmabuf_uapi.h: Linux _IOC encodings for the dma-buf ioctl
+  numbers (only built, never issued: no dma-buf on Haiku).
+---
+diff --git a/third_party/wayland-protocols/BUILD.gn b/third_party/wayland-protocols/BUILD.gn
+index 7beb117..4656571 100644
+--- a/third_party/wayland-protocols/BUILD.gn
++++ b/third_party/wayland-protocols/BUILD.gn
+@@ -107,6 +107,11 @@ wayland_protocol("org_kde_kwin_idle") {
+   sources = [ "kde/src/protocols/idle.xml" ]
+ }
+ 
++# Chromium-HaikuOS: server-side decorations on Haiku.
++wayland_protocol("org_kde_kwin_server_decoration") {
++  sources = [ "kde/src/protocols/server-decoration.xml" ]
++}
++
+ wayland_protocol("pointer_constraints_protocol") {
+   sources =
+       [ "src/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml" ]
+diff --git a/ui/events/keycodes/dom/keycode_converter.cc b/ui/events/keycodes/dom/keycode_converter.cc
+index 9272fc7..737dc25 100644
+--- a/ui/events/keycodes/dom/keycode_converter.cc
++++ b/ui/events/keycodes/dom/keycode_converter.cc
+@@ -15,7 +15,7 @@
+ #include "ui/events/keycodes/dom/dom_code.h"
+ #include "ui/events/keycodes/dom/dom_key.h"
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FREEBSD)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_HAIKU)
+ #include <linux/input.h>
+ #endif
+ 
+@@ -67,7 +67,7 @@ struct DomKeyMapEntry {
+ #undef DOM_KEY_UNI
+ #undef DOM_KEY_MAP_DECLARATION_END
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FREEBSD)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_HAIKU)
+ 
+ // The offset between XKB Keycode and evdev code.
+ constexpr int kXkbKeycodeOffset = 8;
+@@ -188,7 +188,7 @@ int KeycodeConverter::DomCodeToNativeKeycode(DomCode code) {
+   return UsbKeycodeToNativeKeycode(static_cast<uint32_t>(code));
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FREEBSD)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_HAIKU)
+ // static
+ DomCode KeycodeConverter::XkbKeycodeToDomCode(uint32_t xkb_keycode) {
+   // Currently XKB keycode is the native keycode.
+diff --git a/ui/events/keycodes/dom/keycode_converter.h b/ui/events/keycodes/dom/keycode_converter.h
+index dcb2362..f4c0c6c 100644
+--- a/ui/events/keycodes/dom/keycode_converter.h
++++ b/ui/events/keycodes/dom/keycode_converter.h
+@@ -65,7 +65,7 @@ class KeycodeConverter {
+   // Convert a DomCode into a native keycode.
+   static int DomCodeToNativeKeycode(DomCode code);
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FREEBSD)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_HAIKU)
+   // Convert a XKB keycode into a DomCode.
+   static DomCode XkbKeycodeToDomCode(uint32_t xkb_keycode);
+ 
+diff --git a/ui/gfx/linux/dmabuf_uapi.h b/ui/gfx/linux/dmabuf_uapi.h
+index d8f8e47..0259d0e 100644
+--- a/ui/gfx/linux/dmabuf_uapi.h
++++ b/ui/gfx/linux/dmabuf_uapi.h
+@@ -7,6 +7,21 @@
+ 
+ #include <sys/types.h>
+ 
++#if defined(__HAIKU__)  // HAIKU_DMABUF_IOC_V2
++// Linux _IOC encoding, only used to build ioctl numbers (never issued).
++#undef _IOC
++#undef _IO
++#undef _IOR
++#undef _IOW
++#undef _IOWR
++#define _IOC(dir, type, nr, size) \
++  ((unsigned long)(((dir) << 30) | ((size) << 16) | ((type) << 8) | (nr)))
++#define _IO(type, nr) _IOC(0U, (type), (nr), 0)
++#define _IOW(type, nr, t) _IOC(1U, (type), (nr), sizeof(t))
++#define _IOR(type, nr, t) _IOC(2U, (type), (nr), sizeof(t))
++#define _IOWR(type, nr, t) _IOC(3U, (type), (nr), sizeof(t))
++#endif
++
+ typedef int32_t  __s32;
+ typedef uint32_t __u32;
+ typedef uint64_t __u64;
+diff --git a/ui/ozone/platform/wayland/BUILD.gn b/ui/ozone/platform/wayland/BUILD.gn
+index fe13fad..130b5d7 100644
+--- a/ui/ozone/platform/wayland/BUILD.gn
++++ b/ui/ozone/platform/wayland/BUILD.gn
+@@ -269,6 +269,7 @@ source_set("wayland") {
+     "//third_party/wayland-protocols:linux_drm_syncobj_protocol",
+     "//third_party/wayland-protocols:org_kde_kwin_appmenu",
+     "//third_party/wayland-protocols:org_kde_kwin_idle",
++    "//third_party/wayland-protocols:org_kde_kwin_server_decoration",
+     "//third_party/wayland-protocols:pointer_constraints_protocol",
+     "//third_party/wayland-protocols:pointer_gestures_protocol",
+     "//third_party/wayland-protocols:presentation_time_protocol",
+diff --git a/ui/ozone/platform/wayland/common/wayland_object.cc b/ui/ozone/platform/wayland/common/wayland_object.cc
+index 390c605..f1eeadf 100644
+--- a/ui/ozone/platform/wayland/common/wayland_object.cc
++++ b/ui/ozone/platform/wayland/common/wayland_object.cc
+@@ -2,6 +2,7 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include "build/build_config.h"
+ #include "ui/ozone/platform/wayland/common/wayland_object.h"
+ 
+ #include <alpha-compositing-unstable-v1-client-protocol.h>
+@@ -261,6 +262,8 @@ IMPLEMENT_WAYLAND_OBJECT_TRAITS_WITH_DELETER(wl_output, delete_output)
+ IMPLEMENT_WAYLAND_OBJECT_TRAITS_WITH_DELETER(wl_pointer, delete_pointer)
+ IMPLEMENT_WAYLAND_OBJECT_TRAITS_WITH_DELETER(wl_seat, delete_seat)
+ IMPLEMENT_WAYLAND_OBJECT_TRAITS_WITH_DELETER(wl_touch, delete_touch)
++#if !BUILDFLAG(IS_HAIKU)  // Haiku: libwayland has no wl_fixes
+ IMPLEMENT_WAYLAND_OBJECT_TRAITS(wl_fixes)
++#endif
+ 
+ }  // namespace wl
+diff --git a/ui/ozone/platform/wayland/common/wayland_object.h b/ui/ozone/platform/wayland/common/wayland_object.h
+index d746805..b116996 100644
+--- a/ui/ozone/platform/wayland/common/wayland_object.h
++++ b/ui/ozone/platform/wayland/common/wayland_object.h
+@@ -7,6 +7,7 @@
+ 
+ #include <memory>
+ 
++#include "build/build_config.h"
+ #include "base/check.h"
+ #include "ui/ozone/platform/wayland/common/wayland.h"
+ 
+@@ -219,6 +220,8 @@ DECLARE_WAYLAND_OBJECT_TRAITS(zxdg_exporter_v2)
+ DECLARE_WAYLAND_OBJECT_TRAITS(zxdg_output_manager_v1)
+ DECLARE_WAYLAND_OBJECT_TRAITS(zxdg_output_v1)
+ DECLARE_WAYLAND_OBJECT_TRAITS(zxdg_toplevel_decoration_v1)
++#if !BUILDFLAG(IS_HAIKU)  // Haiku: libwayland has no wl_fixes
+ DECLARE_WAYLAND_OBJECT_TRAITS(wl_fixes)
++#endif
+ 
+ #endif  // UI_OZONE_PLATFORM_WAYLAND_COMMON_WAYLAND_OBJECT_H_
+diff --git a/ui/ozone/platform/wayland/host/wayland_connection.cc b/ui/ozone/platform/wayland/host/wayland_connection.cc
+index 7e3c92a..215a043 100644
+--- a/ui/ozone/platform/wayland/host/wayland_connection.cc
++++ b/ui/ozone/platform/wayland/host/wayland_connection.cc
+@@ -2,11 +2,13 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include "build/build_config.h"
+ #include "ui/ozone/platform/wayland/host/wayland_connection.h"
+ 
+ #include <content-type-v1-client-protocol.h>
+ #include <extended-drag-unstable-v1-client-protocol.h>
+ #include <presentation-time-client-protocol.h>
++#include <server-decoration-client-protocol.h>  // Chromium-HaikuOS
+ #include <xdg-shell-client-protocol.h>
+ 
+ #include <cstdint>
+@@ -28,7 +30,9 @@
+ #include "ui/events/devices/touchscreen_device.h"
+ #include "ui/events/platform/wayland/wayland_event_watcher.h"
+ #include "ui/gfx/geometry/point.h"
++#if !BUILDFLAG(IS_HAIKU)
+ #include "ui/gfx/linux/scoped_gbm_device.h"
++#endif
+ #include "ui/ozone/common/features.h"
+ #include "ui/ozone/platform/wayland/common/wayland_util.h"
+ #include "ui/ozone/platform/wayland/host/fractional_scale_manager.h"
+@@ -96,7 +100,7 @@ constexpr uint32_t kMaxXdgToplevelDragVersion = 1;
+ constexpr uint32_t kMaxXdgOutputManagerVersion = 3;
+ constexpr uint32_t kMaxKeyboardShortcutsInhibitManagerVersion = 1;
+ constexpr uint32_t kMaxWpContentTypeVersion = 1;
+-constexpr uint32_t kMaxFixesVersion = 2;
++[[maybe_unused]] constexpr uint32_t kMaxFixesVersion = 2;
+ 
+ int64_t ConvertTimespecToMicros(const struct timespec& ts) {
+   // On 32-bit systems, the calculation cannot overflow int64_t.
+@@ -141,9 +145,11 @@ bool MinSupportedKernelForLinuxDrmSyncobj() {
+ WaylandConnection::WaylandConnection() = default;
+ 
+ WaylandConnection::~WaylandConnection() {
++#if !BUILDFLAG(IS_HAIKU)  // Haiku: libwayland has no wl_fixes
+   if (fixes_ && registry_) {
+     wl_fixes_destroy_registry(fixes_.get(), registry_.get());
+   }
++#endif
+   if (wayland_output_manager() && wayland_output_manager()->wayland_screen()) {
+     wayland_output_manager()->wayland_screen()->ResetConnection();
+   }
+@@ -600,10 +606,12 @@ void WaylandConnection::OnGlobalRemove(void* data,
+     self->output_manager_->RemoveWaylandOutput(name);
+   }
+ 
++#if !BUILDFLAG(IS_HAIKU)  // Haiku: libwayland has no wl_fixes
+   if (self->fixes_ && wl::get_version_of_object(self->fixes_.get()) >=
+                           WL_FIXES_ACK_GLOBAL_REMOVE_SINCE_VERSION) {
+     wl_fixes_ack_global_remove(self->fixes_.get(), registry, name);
+   }
++#endif
+ }
+ 
+ // static
+@@ -751,6 +759,21 @@ void WaylandConnection::HandleGlobal(wl_registry* registry,
+       LOG(ERROR) << "Failed to bind to zwp_text_input_manager_v3 global";
+       return;
+     }
++  } else if (!kde_server_decoration_manager_ &&
++             UNSAFE_TODO(strcmp(interface,
++                                "org_kde_kwin_server_decoration_manager")) ==
++                 0) {
++    // Chromium-HaikuOS: Haiku's wayland_server draws native decorations
++    // through this protocol.
++    kde_server_decoration_manager_ =
++        static_cast<::org_kde_kwin_server_decoration_manager*>(
++            wl_registry_bind(registry, name,
++                             &org_kde_kwin_server_decoration_manager_interface,
++                             1));
++    if (!kde_server_decoration_manager_) {
++      LOG(ERROR) << "Failed to bind org_kde_kwin_server_decoration_manager";
++      return;
++    }
+   } else if (!xdg_decoration_manager_ &&
+              UNSAFE_TODO(strcmp(interface, "zxdg_decoration_manager_v1")) ==
+                  0) {
+@@ -789,6 +812,7 @@ void WaylandConnection::HandleGlobal(wl_registry* registry,
+     if (output_manager_) {
+       output_manager_->InitializeAllXdgOutputs();
+     }
++#if !BUILDFLAG(IS_HAIKU)  // Haiku: libwayland has no wl_fixes
+   } else if (!fixes_ && UNSAFE_TODO(strcmp(interface, "wl_fixes")) == 0) {
+     fixes_ =
+         wl::Bind<wl_fixes>(registry, name, std::min(version, kMaxFixesVersion));
+@@ -796,6 +820,7 @@ void WaylandConnection::HandleGlobal(wl_registry* registry,
+       LOG(ERROR) << "Failed to bind to wl_fixes global";
+       return;
+     }
++#endif
+   }
+ 
+   available_globals_.emplace_back(interface, version);
+@@ -819,6 +844,9 @@ struct wl_registry* WaylandConnection::GetRegistry() {
+ 
+ void WaylandConnection::SetRenderNodePath(base::ScopedFD& drm_fd,
+                                           const char* render_node_path) {
++#if BUILDFLAG(IS_HAIKU)
++  // No DRM/GBM on Haiku.
++#else
+   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kRenderNodeOverride)) {
+     TRACE_EVENT("wayland", "scoped attempt of gbm_create_device");
+@@ -830,6 +858,7 @@ void WaylandConnection::SetRenderNodePath(base::ScopedFD& drm_fd,
+       }
+     }
+   }
++#endif
+ }
+ 
+ }  // namespace ui
+diff --git a/ui/ozone/platform/wayland/host/wayland_connection.h b/ui/ozone/platform/wayland/host/wayland_connection.h
+index 3df2c14..37056fa 100644
+--- a/ui/ozone/platform/wayland/host/wayland_connection.h
++++ b/ui/ozone/platform/wayland/host/wayland_connection.h
+@@ -12,6 +12,7 @@
+ #include <string>
+ #include <vector>
+ 
++#include "build/build_config.h"
+ #include "base/containers/flat_map.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/time/time.h"
+@@ -34,6 +35,9 @@ namespace wl {
+ class WaylandProxy;
+ }
+ 
++// Chromium-HaikuOS: KDE server-decoration (Haiku wayland_server).
++struct org_kde_kwin_server_decoration_manager;
++
+ namespace ui {
+ 
+ struct InputDevice;
+@@ -123,6 +127,11 @@ class WaylandConnection {
+   zxdg_decoration_manager_v1* xdg_decoration_manager_v1() const {
+     return xdg_decoration_manager_.get();
+   }
++  // Chromium-HaikuOS: KDE server-decoration manager, if offered.
++  ::org_kde_kwin_server_decoration_manager* kde_server_decoration_manager()
++      const {
++    return kde_server_decoration_manager_;
++  }
+   zcr_extended_drag_v1* extended_drag_v1() const {
+     return extended_drag_v1_.get();
+   }
+@@ -427,12 +436,18 @@ class WaylandConnection {
+   bool enable_linux_drm_syncobj_for_testing_ = false;
+   wl::Object<wp_linux_drm_syncobj_manager_v1> linux_drm_syncobj_manager_;
+   wl::Object<zxdg_decoration_manager_v1> xdg_decoration_manager_;
++  // Chromium-HaikuOS: not owned by a wl::Object; lives as long as the
++  // connection.
++  ::org_kde_kwin_server_decoration_manager* kde_server_decoration_manager_ =
++      nullptr;
+   wl::Object<zcr_extended_drag_v1> extended_drag_v1_;
+   wl::Object<::xdg_toplevel_drag_manager_v1> xdg_toplevel_drag_manager_v1_;
+   wl::Object<zxdg_output_manager_v1> xdg_output_manager_;
+   wl::Object<wp_fractional_scale_manager_v1> fractional_scale_manager_v1_;
+   wl::Object<xdg_toplevel_icon_manager_v1> toplevel_icon_manager_v1_;
++#if !BUILDFLAG(IS_HAIKU)  // Haiku: libwayland has no wl_fixes
+   wl::Object<wl_fixes> fixes_;
++#endif
+ 
+   // Manages Wayland windows.
+   WaylandWindowManager window_manager_{this};
+diff --git a/ui/ozone/platform/wayland/host/wayland_keyboard.cc b/ui/ozone/platform/wayland/host/wayland_keyboard.cc
+index e091a74..99a57a5 100644
+--- a/ui/ozone/platform/wayland/host/wayland_keyboard.cc
++++ b/ui/ozone/platform/wayland/host/wayland_keyboard.cc
+@@ -2,6 +2,7 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include "build/build_config.h"
+ #include "ui/ozone/platform/wayland/host/wayland_keyboard.h"
+ 
+ #include <keyboard-extension-unstable-v1-client-protocol.h>
+@@ -40,6 +41,12 @@
+ #include "ui/events/ozone/layout/xkb/xkb_keyboard_layout_engine.h"
+ #endif
+ 
++#if BUILDFLAG(IS_HAIKU) && !defined(WL_KEYBOARD_KEY_STATE_REPEATED)
++// libwayland < 1.24 has no compositor-side key repeat state; the
++// compositor never sends it, so any value that isn't 0/1 works.
++#define WL_KEYBOARD_KEY_STATE_REPEATED 2
++#endif
++
+ namespace ui {
+ 
+ namespace {
+diff --git a/ui/ozone/platform/wayland/host/wayland_pointer.cc b/ui/ozone/platform/wayland/host/wayland_pointer.cc
+index 06a9ae1..d116110 100644
+--- a/ui/ozone/platform/wayland/host/wayland_pointer.cc
++++ b/ui/ozone/platform/wayland/host/wayland_pointer.cc
+@@ -2,6 +2,7 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
++#include "build/build_config.h"
+ #include "ui/ozone/platform/wayland/host/wayland_pointer.h"
+ 
+ #include <linux/input.h>
+@@ -51,7 +52,9 @@ WaylandPointer::WaylandPointer(wl_pointer* pointer,
+       .axis_stop = &OnAxisStop,
+       .axis_discrete = &OnAxisDiscrete,
+       .axis_value120 = &OnAxisValue120,
++#if !BUILDFLAG(IS_HAIKU)  // libwayland < 1.22
+       .axis_relative_direction = &OnAxisRelativeDirection,
++#endif
+   };
+   wl_pointer_add_listener(obj_.get(), &kPointerListener, this);
+ }
+diff --git a/ui/ozone/platform/wayland/host/xdg_toplevel.cc b/ui/ozone/platform/wayland/host/xdg_toplevel.cc
+index c85b59a..465421f 100644
+--- a/ui/ozone/platform/wayland/host/xdg_toplevel.cc
++++ b/ui/ozone/platform/wayland/host/xdg_toplevel.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "ui/ozone/platform/wayland/host/xdg_toplevel.h"
+ 
++#include <server-decoration-client-protocol.h>  // Chromium-HaikuOS
+ #include <xdg-decoration-unstable-v1-client-protocol.h>
+ #include <xdg-shell-client-protocol.h>
+ #include <xdg-toplevel-icon-v1-client-protocol.h>
+@@ -30,6 +31,7 @@
+ #include "ui/ozone/platform/wayland/host/wayland_seat.h"
+ #include "ui/ozone/platform/wayland/host/wayland_serial_tracker.h"
+ #include "ui/ozone/platform/wayland/host/wayland_shm_buffer.h"
++#include "ui/ozone/platform/wayland/host/wayland_surface.h"
+ #include "ui/ozone/platform/wayland/host/wayland_toplevel_window.h"
+ #include "ui/ozone/platform/wayland/host/wayland_window.h"
+ #include "ui/ozone/platform/wayland/host/xdg_surface.h"
+@@ -94,7 +96,12 @@ XdgToplevel::XdgToplevel(std::unique_ptr<XdgSurface> xdg_surface)
+   CHECK(xdg_surface_);
+ }
+ 
+-XdgToplevel::~XdgToplevel() = default;
++XdgToplevel::~XdgToplevel() {
++  if (kde_decoration_) {  // Chromium-HaikuOS
++    org_kde_kwin_server_decoration_release(kde_decoration_);
++    kde_decoration_ = nullptr;
++  }
++}
+ 
+ bool XdgToplevel::Initialize() {
+   if (!xdg_surface_) {
+@@ -298,7 +305,37 @@ void XdgToplevel::OnDecorationConfigure(void* data,
+   self->decoration_mode_ = ToDecorationMode(mode);
+ }
+ 
++// static
++void XdgToplevel::OnKdeDecorationMode(
++    void* data,
++    ::org_kde_kwin_server_decoration* decoration,
++    uint32_t mode) {
++  auto* self = static_cast<XdgToplevel*>(data);
++  DCHECK(self);
++  switch (mode) {
++    case ORG_KDE_KWIN_SERVER_DECORATION_MODE_SERVER:
++      self->decoration_mode_ = DecorationMode::kServerSide;
++      break;
++    case ORG_KDE_KWIN_SERVER_DECORATION_MODE_CLIENT:
++      self->decoration_mode_ = DecorationMode::kClientSide;
++      break;
++    default:
++      self->decoration_mode_ = DecorationMode::kNone;
++      break;
++  }
++}
++
+ void XdgToplevel::SetTopLevelDecorationMode(DecorationMode requested_mode) {
++  if (kde_decoration_) {  // Chromium-HaikuOS
++    if (requested_mode != decoration_mode_) {
++      org_kde_kwin_server_decoration_request_mode(
++          kde_decoration_,
++          requested_mode == DecorationMode::kServerSide
++              ? ORG_KDE_KWIN_SERVER_DECORATION_MODE_SERVER
++              : ORG_KDE_KWIN_SERVER_DECORATION_MODE_CLIENT);
++    }
++    return;
++  }
+   if (!zxdg_toplevel_decoration_ || requested_mode == decoration_mode_) {
+     return;
+   }
+@@ -320,6 +357,17 @@ void XdgToplevel::InitializeXdgDecoration() {
+         };
+     zxdg_toplevel_decoration_v1_add_listener(
+         zxdg_toplevel_decoration_.get(), &kToplevelDecorationListener, this);
++  } else if (connection()->kde_server_decoration_manager()) {
++    // Chromium-HaikuOS: fall back to the KDE protocol (Haiku wayland_server).
++    kde_decoration_ = org_kde_kwin_server_decoration_manager_create(
++        connection()->kde_server_decoration_manager(),
++        window()->root_surface()->surface());
++    static constexpr org_kde_kwin_server_decoration_listener
++        kKdeDecorationListener = {
++            .mode = &OnKdeDecorationMode,
++        };
++    org_kde_kwin_server_decoration_add_listener(
++        kde_decoration_, &kKdeDecorationListener, this);
+   }
+ }
+ 
+diff --git a/ui/ozone/platform/wayland/host/xdg_toplevel.h b/ui/ozone/platform/wayland/host/xdg_toplevel.h
+index 9dbbbd9..b50ca42 100644
+--- a/ui/ozone/platform/wayland/host/xdg_toplevel.h
++++ b/ui/ozone/platform/wayland/host/xdg_toplevel.h
+@@ -17,6 +17,9 @@
+ #include "ui/ozone/platform/wayland/common/wayland_object.h"
+ #include "ui/ozone/platform/wayland/host/xdg_surface.h"
+ 
++// Chromium-HaikuOS: KDE server-decoration (Haiku wayland_server).
++struct org_kde_kwin_server_decoration;
++
+ namespace ui {
+ 
+ class WaylandConnection;
+@@ -88,6 +91,12 @@ class XdgToplevel {
+   // Initializes the xdg-decoration protocol extension, if available.
+   void InitializeXdgDecoration();
+ 
++  // Chromium-HaikuOS: org_kde_kwin_server_decoration listener.
++  static void OnKdeDecorationMode(
++      void* data,
++      ::org_kde_kwin_server_decoration* decoration,
++      uint32_t mode);
++
+   // Creates a wl_region from `shape_rects`.
+   wl::Object<wl_region> CreateAndAddRegion(const ShapeRects& shape_rects);
+ 
+@@ -101,6 +110,8 @@ class XdgToplevel {
+   wl::Object<xdg_toplevel> xdg_toplevel_;
+ 
+   wl::Object<zxdg_toplevel_decoration_v1> zxdg_toplevel_decoration_;
++  // Chromium-HaikuOS: used when only the KDE protocol is available.
++  ::org_kde_kwin_server_decoration* kde_decoration_ = nullptr;
+ 
+   // On client side, it keeps track of the decoration mode currently in
+   // use if xdg-decoration protocol extension is available.
+diff --git a/ui/ozone/platform/wayland/ozone_platform_wayland.cc b/ui/ozone/platform/wayland/ozone_platform_wayland.cc
+index 39b1aa8..7fed318 100644
+--- a/ui/ozone/platform/wayland/ozone_platform_wayland.cc
++++ b/ui/ozone/platform/wayland/ozone_platform_wayland.cc
+@@ -234,7 +234,8 @@ class OzonePlatformWayland : public OzonePlatform,
+   }
+ 
+   bool ShouldUseCustomFrame() override {
+-    return connection_->xdg_decoration_manager_v1() == nullptr;
++    return connection_->xdg_decoration_manager_v1() == nullptr &&
++           connection_->kde_server_decoration_manager() == nullptr;  // Chromium-HaikuOS
+   }
+ 
+   void OnPreSandboxStartup() override {
+@@ -346,7 +347,12 @@ class OzonePlatformWayland : public OzonePlatform,
+       // Whether the environment has any support only gets known at run time, so
+       // we use the custom frame by default.  If there is support, the user will
+       // be able to enable the system frame.
++#if BUILDFLAG(IS_HAIKU)
++      // Chromium-HaikuOS: use the native Haiku window frame by default.
++      properties->custom_frame_pref_default = false;
++#else
+       properties->custom_frame_pref_default = true;
++#endif
+ 
+       // Wayland uses sub-surfaces to show tooltips, and sub-surfaces must be
+       // bound to their root surfaces always, but finding the correct root
+@@ -392,7 +398,8 @@ class OzonePlatformWayland : public OzonePlatform,
+       // These properties are set when GetPlatformRuntimeProperties is called on
+       // the browser process side.
+       properties.supports_server_side_window_decorations =
+-          (connection_->xdg_decoration_manager_v1() != nullptr &&
++          ((connection_->xdg_decoration_manager_v1() != nullptr ||
++            connection_->kde_server_decoration_manager() != nullptr) &&  // Chromium-HaikuOS
+            override_supports_ssd_for_test == SupportsForTest::kNotSet) ||
+           override_supports_ssd_for_test == SupportsForTest::kYes;
+       properties.supports_server_window_menus = connection_->shell();

@@ -1,0 +1,693 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] media: Media Kit audio output, AV1 decoding and capture fixes
+
+- audio/haiku/audio_manager_haiku.{h,cc}: an AudioManager for Haiku.
+  Output streams play through the Media Kit (BSoundPlayer, interleaved
+  float); Chromium's fixed-size OnMoreData() buffers are adapted to the
+  Media Kit's buffer size with an AudioPullFifo. Input streams are silent
+  fakes for now. The Media Kit is C++ built against Haiku's libstdc++,
+  while Chromium uses its own libc++, so the BSoundPlayer calls live in a
+  small C-ABI shim, build/config/haiku/compat/lib/haiku_media_audio.cpp,
+  compiled by scripts/build.sh with the system compiler into
+  libhaikucompat.a. The shim starts a BApplication on its own thread when
+  the process has none (the audio service runs in a utility process).
+- audio/BUILD.gn: build the Haiku audio manager.
+- filters/dav1d_video_decoder.cc: compare dav1d's return codes with
+  DAV1D_ERR(EAGAIN) instead of -EAGAIN. Haiku's errno values are
+  negative, so dav1d returns EAGAIN unchanged and every "try again" was
+  treated as a fatal decode error: AV1 video never played.
+- base/media_switches.cc: define the Linux/BSD media feature block
+  (kAcceleratedVideoDecodeLinux, the PulseAudio loopback features, the
+  audio-backend parameter) for Haiku; haikuify skipped it because the
+  block mentions sndio, while the header declares it for Haiku.
+- capture: Haiku has no V4L2. The capture factory reports no devices
+  instead of returning null (which crashed the video capture service when
+  a page enumerated cameras), and the V4L2 buffer tracker and
+  video/linux target are not built.
+---
+diff --git a/build/config/haiku/compat/lib/haiku_media_audio.cpp b/build/config/haiku/compat/lib/haiku_media_audio.cpp
+new file mode 100644
+index 0000000..984ed1c
+--- /dev/null
++++ b/build/config/haiku/compat/lib/haiku_media_audio.cpp
+@@ -0,0 +1,146 @@
++/*
++ * Chromium-HaikuOS: C-ABI shim around Haiku's Media Kit (BSoundPlayer) for
++ * media/audio/haiku/audio_manager_haiku.cc.
++ *
++ * Built with the system compiler and Haiku's own headers/libstdc++ into
++ * libhaikucompat.a (scripts build it, not GN), so Chromium's libc++ never
++ * sees Haiku's C++ headers. Linked with libbe and libmedia.
++ *
++ * The Media Kit needs a BApplication (be_app). Chromium's audio service runs
++ * in a utility process that has none, so the first open creates one on its
++ * own thread, the same way SDL does for its Haiku audio backend.
++ */
++
++#include <Application.h>
++#include <OS.h>
++#include <SoundPlayer.h>
++
++#include <stddef.h>
++#include <stdlib.h>
++
++extern "C" {
++typedef void (*chromium_haiku_audio_fill_fn)(void* cookie, void* buffer,
++	size_t size);
++}
++
++namespace {
++
++int32 sAppStarted = 0;
++sem_id sAppReady = -1;
++
++status_t
++app_thread(void*)
++{
++	BApplication* app
++		= new BApplication("application/x-vnd.chromium-haiku-audio");
++	release_sem(sAppReady);
++	app->Run();
++	delete app;
++	return B_OK;
++}
++
++bool
++ensure_app()
++{
++	if (be_app != NULL)
++		return true;
++	if (atomic_test_and_set(&sAppStarted, 1, 0) == 0) {
++		sAppReady = create_sem(0, "chromium audio app ready");
++		thread_id thread = spawn_thread(app_thread, "chromium audio app",
++			B_NORMAL_PRIORITY, NULL);
++		if (thread < 0)
++			return false;
++		resume_thread(thread);
++		acquire_sem_etc(sAppReady, 1, B_RELATIVE_TIMEOUT, 5000000);
++	} else {
++		for (int i = 0; i < 500 && be_app == NULL; i++)
++			snooze(10000);
++	}
++	return be_app != NULL;
++}
++
++struct Stream {
++	BSoundPlayer* player;
++	chromium_haiku_audio_fill_fn fill;
++	void* cookie;
++};
++
++void
++play_buffer(void* cookie, void* buffer, size_t size,
++	const media_raw_audio_format&)
++{
++	Stream* stream = static_cast<Stream*>(cookie);
++	stream->fill(stream->cookie, buffer, size);
++}
++
++}	// namespace
++
++extern "C" {
++
++void*
++chromium_haiku_audio_open(float frameRate, unsigned int channels,
++	size_t bufferBytes, chromium_haiku_audio_fill_fn fill, void* cookie)
++{
++	if (fill == NULL || !ensure_app())
++		return NULL;
++
++	media_raw_audio_format format = media_raw_audio_format::wildcard;
++	format.frame_rate = frameRate;
++	format.channel_count = channels;
++	format.format = media_raw_audio_format::B_AUDIO_FLOAT;
++	format.byte_order = B_MEDIA_HOST_ENDIAN;
++	format.buffer_size = bufferBytes;
++
++	// Plain malloc/free for our own POD state: this object is compiled
++	// against libstdc++ but linked into Chromium, so avoid relying on any
++	// particular operator new/delete variant beyond the basic ones the Media
++	// Kit classes need.
++	Stream* stream = static_cast<Stream*>(malloc(sizeof(Stream)));
++	if (stream == NULL)
++		return NULL;
++	stream->fill = fill;
++	stream->cookie = cookie;
++	stream->player = new BSoundPlayer(&format, "Chromium", play_buffer, NULL,
++		stream);
++	if (stream->player->InitCheck() != B_OK) {
++		delete stream->player;
++		free(stream);
++		return NULL;
++	}
++	return stream;
++}
++
++int
++chromium_haiku_audio_start(void* handle)
++{
++	Stream* stream = static_cast<Stream*>(handle);
++	if (stream->player->Start() != B_OK)
++		return -1;
++	stream->player->SetHasData(true);
++	return 0;
++}
++
++void
++chromium_haiku_audio_stop(void* handle)
++{
++	Stream* stream = static_cast<Stream*>(handle);
++	stream->player->SetHasData(false);
++	stream->player->Stop(true, true);
++}
++
++void
++chromium_haiku_audio_close(void* handle)
++{
++	Stream* stream = static_cast<Stream*>(handle);
++	chromium_haiku_audio_stop(handle);
++	delete stream->player;
++	free(stream);
++}
++
++long long
++chromium_haiku_audio_latency_us(void* handle)
++{
++	return static_cast<Stream*>(handle)->player->Latency();
++}
++
++}	// extern "C"
+diff --git a/media/audio/BUILD.gn b/media/audio/BUILD.gn
+index e57723d..fb118dd 100644
+--- a/media/audio/BUILD.gn
++++ b/media/audio/BUILD.gn
+@@ -298,6 +298,14 @@ source_set("audio") {
+     sources += [ "sndio/audio_manager_sndio.cc" ]
+   }
+ 
++  # Chromium-HaikuOS: Media Kit output (see haiku/audio_manager_haiku.h).
++  if (is_haiku) {
++    sources += [
++      "haiku/audio_manager_haiku.cc",
++      "haiku/audio_manager_haiku.h",
++    ]
++  }
++
+   if (use_sndio) {
+     libs += [ "sndio" ]
+     sources += [
+diff --git a/media/audio/haiku/audio_manager_haiku.cc b/media/audio/haiku/audio_manager_haiku.cc
+new file mode 100644
+index 0000000..2bd1826
+--- /dev/null
++++ b/media/audio/haiku/audio_manager_haiku.cc
+@@ -0,0 +1,292 @@
++// Copyright 2026 The Chromium Authors and Chromium-HaikuOS contributors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++// Chromium-HaikuOS: see audio_manager_haiku.h for the overall design.
++
++#include "media/audio/haiku/audio_manager_haiku.h"
++
++#include <stddef.h>
++#include <string.h>
++
++#include <algorithm>
++#include <atomic>
++#include <memory>
++#include <utility>
++
++#include "base/compiler_specific.h"
++#include "base/containers/span.h"
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/raw_ptr_exclusion.h"
++#include "base/synchronization/lock.h"
++#include "base/thread_annotations.h"
++#include "base/time/time.h"
++#include "media/audio/audio_io.h"
++#include "media/audio/fake_audio_input_stream.h"
++#include "media/base/audio_bus.h"
++#include "media/base/audio_glitch_info.h"
++#include "media/base/audio_parameters.h"
++#include "media/base/audio_pull_fifo.h"
++#include "media/base/audio_sample_types.h"
++#include "media/base/audio_timestamp_helper.h"
++#include "media/base/channel_layout.h"
++
++// C interface of the Media Kit shim (build/config/haiku/compat/lib,
++// haiku_media_audio.cpp). All functions are safe to call from any thread.
++extern "C" {
++typedef void (*chromium_haiku_audio_fill_fn)(void* cookie,
++                                             void* buffer,
++                                             size_t size);
++// Creates a BSoundPlayer producing interleaved float samples. Returns null on
++// failure (e.g. media_server not running).
++void* chromium_haiku_audio_open(float frame_rate,
++                                unsigned int channels,
++                                size_t buffer_bytes,
++                                chromium_haiku_audio_fill_fn fill,
++                                void* cookie);
++// Starts playback; |fill| is then called on the Media Kit's thread.
++int chromium_haiku_audio_start(void* handle);
++// Stops playback. Blocks until |fill| is no longer running.
++void chromium_haiku_audio_stop(void* handle);
++// Stops (if needed) and destroys the player.
++void chromium_haiku_audio_close(void* handle);
++// Output latency reported by the Media Kit, in microseconds.
++long long chromium_haiku_audio_latency_us(void* handle);
++}
++
++namespace media {
++
++namespace {
++
++constexpr int kDefaultSampleRate = 48000;
++// ~21 ms at 48 kHz. Chromium's renderer asks for this many frames per
++// OnMoreData(); the Media Kit buffer size can differ, AudioPullFifo adapts.
++constexpr int kDefaultOutputBufferSize = 1024;
++constexpr int kDefaultInputBufferSize = 1024;
++
++class HaikuAudioOutputStream : public AudioOutputStream {
++ public:
++  HaikuAudioOutputStream(AudioManagerBase* manager,
++                         const AudioParameters& params)
++      : manager_(manager),
++        params_(params),
++        fifo_(params.channels(),
++              params.frames_per_buffer(),
++              base::BindRepeating(&HaikuAudioOutputStream::PullData,
++                                  base::Unretained(this))) {}
++
++  HaikuAudioOutputStream(const HaikuAudioOutputStream&) = delete;
++  HaikuAudioOutputStream& operator=(const HaikuAudioOutputStream&) = delete;
++
++  ~HaikuAudioOutputStream() override { DCHECK(!handle_); }
++
++  // AudioOutputStream:
++  bool Open() override {
++    const size_t bytes = static_cast<size_t>(params_.frames_per_buffer()) *
++                         params_.channels() * sizeof(float);
++    handle_ = chromium_haiku_audio_open(
++        static_cast<float>(params_.sample_rate()), params_.channels(), bytes,
++        &HaikuAudioOutputStream::FillThunk, this);
++    if (!handle_) {
++      LOG(ERROR) << "Haiku: could not open a BSoundPlayer (is media_server "
++                    "running?)";
++      return false;
++    }
++    return true;
++  }
++
++  void Start(AudioSourceCallback* callback) override {
++    DCHECK(callback);
++    if (!handle_) {
++      callback->OnError(AudioSourceCallback::ErrorType::kUnknown);
++      return;
++    }
++    {
++      base::AutoLock lock(lock_);
++      callback_ = callback;
++      fifo_.Clear();
++    }
++    latency_ = base::Microseconds(chromium_haiku_audio_latency_us(handle_));
++    if (chromium_haiku_audio_start(handle_) != 0) {
++      {
++        base::AutoLock lock(lock_);
++        callback_ = nullptr;
++      }
++      callback->OnError(AudioSourceCallback::ErrorType::kUnknown);
++    }
++  }
++
++  void Stop() override {
++    if (handle_) {
++      chromium_haiku_audio_stop(handle_);  // Waits for FillThunk to finish.
++    }
++    base::AutoLock lock(lock_);
++    callback_ = nullptr;
++  }
++
++  void SetVolume(double volume) override {
++    volume_.store(static_cast<float>(std::clamp(volume, 0.0, 1.0)),
++                  std::memory_order_relaxed);
++  }
++
++  void GetVolume(double* volume) override {
++    *volume = volume_.load(std::memory_order_relaxed);
++  }
++
++  void Close() override {
++    Stop();
++    if (handle_) {
++      chromium_haiku_audio_close(handle_);
++      handle_ = nullptr;
++    }
++    // Deletes |this|.
++    manager_->ReleaseOutputStream(this);
++  }
++
++  void Flush() override {}
++
++ private:
++  static void FillThunk(void* cookie, void* buffer, size_t size) {
++    static_cast<HaikuAudioOutputStream*>(cookie)->Fill(buffer, size);
++  }
++
++  // Called on the Media Kit's playback thread.
++  void Fill(void* buffer, size_t size) {
++    const int channels = params_.channels();
++    const int frames =
++        static_cast<int>(size / (sizeof(float) * static_cast<size_t>(channels)));
++    base::AutoLock lock(lock_);
++    if (!callback_ || frames <= 0) {
++      UNSAFE_BUFFERS(memset(buffer, 0, size));
++      return;
++    }
++    // The Media Kit keeps its buffer size for the lifetime of the player, so
++    // this allocates once.
++    if (!output_bus_ || output_bus_->frames() != frames) {
++      output_bus_ = AudioBus::Create(channels, frames);
++    }
++    fifo_.Consume(output_bus_.get(), frames);
++    const float volume = volume_.load(std::memory_order_relaxed);
++    if (volume != 1.0f) {
++      output_bus_->Scale(volume);
++    }
++    output_bus_->ToInterleaved<Float32SampleTypeTraits>(UNSAFE_BUFFERS(
++        base::span<float>(static_cast<float*>(buffer),
++                          static_cast<size_t>(frames) * channels)));
++  }
++
++  // AudioPullFifo::ReadCB; runs inside Fill() with |lock_| held.
++  void PullData(int frame_delay, AudioBus* dest)
++      EXCLUSIVE_LOCKS_REQUIRED(lock_) {
++    lock_.AssertAcquired();
++    const base::TimeDelta delay =
++        AudioTimestampHelper::FramesToTime(frame_delay,
++                                           params_.sample_rate()) +
++        latency_;
++    const int filled = callback_->OnMoreData(
++        BoundedDelay(delay), base::TimeTicks::Now(), AudioGlitchInfo(), dest);
++    if (filled < dest->frames()) {
++      dest->ZeroFramesPartial(filled, dest->frames() - filled);
++    }
++  }
++
++  const raw_ptr<AudioManagerBase> manager_;
++  const AudioParameters params_;
++  // Opaque shim handle (Stream*), not owned by PartitionAlloc.
++  RAW_PTR_EXCLUSION void* handle_ = nullptr;
++  base::TimeDelta latency_;
++  std::atomic<float> volume_{1.0f};
++
++  base::Lock lock_;
++  raw_ptr<AudioSourceCallback> callback_ GUARDED_BY(lock_) = nullptr;
++  AudioPullFifo fifo_ GUARDED_BY(lock_);
++  std::unique_ptr<AudioBus> output_bus_ GUARDED_BY(lock_);
++};
++
++}  // namespace
++
++AudioManagerHaiku::AudioManagerHaiku(std::unique_ptr<AudioThread> audio_thread,
++                                     AudioLogFactory* audio_log_factory)
++    : AudioManagerBase(std::move(audio_thread), audio_log_factory) {}
++
++AudioManagerHaiku::~AudioManagerHaiku() = default;
++
++bool AudioManagerHaiku::HasAudioOutputDevices() {
++  return true;
++}
++
++bool AudioManagerHaiku::HasAudioInputDevices() {
++  return false;
++}
++
++const std::string_view AudioManagerHaiku::GetName() {
++  return "Haiku Media Kit";
++}
++
++AudioOutputStream* AudioManagerHaiku::MakeLinearOutputStream(
++    const AudioParameters& params,
++    const LogCallback& log_callback) {
++  return new HaikuAudioOutputStream(this, params);
++}
++
++AudioOutputStream* AudioManagerHaiku::MakeLowLatencyOutputStream(
++    const AudioParameters& params,
++    const std::string& device_id,
++    const LogCallback& log_callback) {
++  return new HaikuAudioOutputStream(this, params);
++}
++
++AudioInputStream* AudioManagerHaiku::MakeLinearInputStream(
++    const AudioParameters& params,
++    const std::string& device_id,
++    const LogCallback& log_callback) {
++  return FakeAudioInputStream::MakeFakeStream(this, params);
++}
++
++AudioInputStream* AudioManagerHaiku::MakeLowLatencyInputStream(
++    const AudioParameters& params,
++    const std::string& device_id,
++    const LogCallback& log_callback) {
++  return FakeAudioInputStream::MakeFakeStream(this, params);
++}
++
++AudioParameters AudioManagerHaiku::GetInputStreamParameters(
++    const std::string& device_id) {
++  return AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY,
++                         ChannelLayoutConfig::Stereo(), kDefaultSampleRate,
++                         kDefaultInputBufferSize);
++}
++
++AudioParameters AudioManagerHaiku::GetPreferredOutputStreamParameters(
++    const std::string& output_device_id,
++    const AudioParameters& input_params) {
++  ChannelLayoutConfig layout = ChannelLayoutConfig::Stereo();
++  int sample_rate = kDefaultSampleRate;
++  if (input_params.IsValid()) {
++    sample_rate = input_params.sample_rate();
++    // Haiku's system mixer handles mono and stereo everywhere; keep anything
++    // wider as stereo until multichannel output is tested.
++    if (input_params.channels() <= 2) {
++      layout = input_params.channel_layout_config();
++    }
++  }
++  return AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY, layout,
++                         sample_rate, kDefaultOutputBufferSize);
++}
++
++// Declared next to its only caller in audio_manager.cc; each platform provides
++// one definition.
++std::unique_ptr<AudioManager> CreateAudioManager(
++    std::unique_ptr<AudioThread> audio_thread,
++    AudioLogFactory* audio_log_factory);
++
++std::unique_ptr<AudioManager> CreateAudioManager(
++    std::unique_ptr<AudioThread> audio_thread,
++    AudioLogFactory* audio_log_factory) {
++  return std::make_unique<AudioManagerHaiku>(std::move(audio_thread),
++                                             audio_log_factory);
++}
++
++}  // namespace media
+diff --git a/media/audio/haiku/audio_manager_haiku.h b/media/audio/haiku/audio_manager_haiku.h
+new file mode 100644
+index 0000000..aa9ae8c
+--- /dev/null
++++ b/media/audio/haiku/audio_manager_haiku.h
+@@ -0,0 +1,69 @@
++// Copyright 2026 The Chromium Authors and Chromium-HaikuOS contributors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++// Chromium-HaikuOS: audio output through Haiku's Media Kit (BSoundPlayer).
++//
++// The Media Kit classes are C++ built against Haiku's libstdc++, while
++// Chromium is built against its own libc++. To keep the two apart, the Media
++// Kit calls live in a small C-ABI shim (chromium_haiku_audio_*), built
++// outside of GN into build/config/haiku/compat/lib/libhaikucompat.a and
++// linked through the compat libm.a linker script. This file only talks to
++// that C interface.
++//
++// Output only for now; capture (microphone) streams are silent fakes.
++
++#ifndef MEDIA_AUDIO_HAIKU_AUDIO_MANAGER_HAIKU_H_
++#define MEDIA_AUDIO_HAIKU_AUDIO_MANAGER_HAIKU_H_
++
++#include <memory>
++#include <string>
++#include <string_view>
++
++#include "media/audio/audio_manager_base.h"
++
++namespace media {
++
++class MEDIA_EXPORT AudioManagerHaiku : public AudioManagerBase {
++ public:
++  AudioManagerHaiku(std::unique_ptr<AudioThread> audio_thread,
++                    AudioLogFactory* audio_log_factory);
++
++  AudioManagerHaiku(const AudioManagerHaiku&) = delete;
++  AudioManagerHaiku& operator=(const AudioManagerHaiku&) = delete;
++
++  ~AudioManagerHaiku() override;
++
++  // AudioManager:
++  bool HasAudioOutputDevices() override;
++  bool HasAudioInputDevices() override;
++  const std::string_view GetName() override;
++
++  // AudioManagerBase:
++  AudioOutputStream* MakeLinearOutputStream(
++      const AudioParameters& params,
++      const LogCallback& log_callback) override;
++  AudioOutputStream* MakeLowLatencyOutputStream(
++      const AudioParameters& params,
++      const std::string& device_id,
++      const LogCallback& log_callback) override;
++  AudioInputStream* MakeLinearInputStream(
++      const AudioParameters& params,
++      const std::string& device_id,
++      const LogCallback& log_callback) override;
++  AudioInputStream* MakeLowLatencyInputStream(
++      const AudioParameters& params,
++      const std::string& device_id,
++      const LogCallback& log_callback) override;
++  AudioParameters GetInputStreamParameters(
++      const std::string& device_id) override;
++
++ protected:
++  AudioParameters GetPreferredOutputStreamParameters(
++      const std::string& output_device_id,
++      const AudioParameters& input_params) override;
++};
++
++}  // namespace media
++
++#endif  // MEDIA_AUDIO_HAIKU_AUDIO_MANAGER_HAIKU_H_
+diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
+index 9af0c43..5627717 100644
+--- a/media/base/media_switches.cc
++++ b/media/base/media_switches.cc
+@@ -1492,7 +1492,7 @@ BASE_FEATURE(kFuchsiaMediacodecVideoEncoder, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ #endif  // BUILDFLAG(IS_FUCHSIA)
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU)
+ // Enable vaapi/v4l2 video decoding on linux. This is already enabled by default
+ // on chromeos, but needs an experiment on linux.
+ BASE_FEATURE(kAcceleratedVideoDecodeLinux,
+@@ -1540,7 +1540,7 @@ const base::FeatureParam<AudioBackend>
+         &kAudioBackend, "audio-backend",
+ #if BUILDFLAG(IS_OPENBSD)
+         AudioBackend::kSndio,
+-#elif BUILDFLAG(IS_FREEBSD)
++#else  // FreeBSD, Haiku
+         AudioBackend::kAuto,
+ #endif
+         &kAudioBackendOptions};
+diff --git a/media/capture/BUILD.gn b/media/capture/BUILD.gn
+index 31c10e8..95375f6 100644
+--- a/media/capture/BUILD.gn
++++ b/media/capture/BUILD.gn
+@@ -193,7 +193,7 @@ component("capture_lib") {
+     public_deps += [ "video/win" ]
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if ((is_linux || is_chromeos) && !is_haiku) {
+     deps += [ "video/linux" ]
+   }
+ 
+diff --git a/media/capture/video/create_video_capture_device_factory.cc b/media/capture/video/create_video_capture_device_factory.cc
+index fc7adab..e15767c 100644
+--- a/media/capture/video/create_video_capture_device_factory.cc
++++ b/media/capture/video/create_video_capture_device_factory.cc
+@@ -17,7 +17,7 @@
+ #include "media/capture/video/file_video_capture_device_factory.h"
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD)
+ #include "media/capture/video/linux/video_capture_device_factory_linux.h"
+ #elif BUILDFLAG(IS_CHROMEOS)
+ #include "media/capture/video/chromeos/public/cros_features.h"
+@@ -64,7 +64,7 @@ std::unique_ptr<VideoCaptureDeviceFactory>
+ CreatePlatformSpecificVideoCaptureDeviceFactory(
+     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+     gpu::GpuDriverBugWorkarounds* gpu_workarounds) {
+-#if BUILDFLAG(IS_LINUX) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD)
+   return std::make_unique<VideoCaptureDeviceFactoryLinux>(ui_task_runner);
+ #elif BUILDFLAG(IS_CHROMEOS)
+   if (base::SysInfo::IsRunningOnChromeOS())
+@@ -85,6 +85,12 @@ CreatePlatformSpecificVideoCaptureDeviceFactory(
+   return std::make_unique<VideoCaptureDeviceFactoryFuchsia>();
+ #elif BUILDFLAG(IS_IOS)
+   return CreateFakeVideoCaptureDeviceFactory();
++#elif BUILDFLAG(IS_HAIKU)
++  // Chromium-HaikuOS: no camera backend yet; report no devices instead
++  // of returning null (which crashed the video capture service).
++  auto result = std::make_unique<FakeVideoCaptureDeviceFactory>();
++  result->SetToCustomDevicesConfig({});
++  return result;
+ #else
+   NOTIMPLEMENTED();
+   return nullptr;
+diff --git a/media/capture/video/video_capture_buffer_tracker_factory_impl.cc b/media/capture/video/video_capture_buffer_tracker_factory_impl.cc
+index c3aca4d..fa7072d 100644
+--- a/media/capture/video/video_capture_buffer_tracker_factory_impl.cc
++++ b/media/capture/video/video_capture_buffer_tracker_factory_impl.cc
+@@ -14,7 +14,7 @@
+ #include "media/capture/video/chromeos/gpu_memory_buffer_tracker_cros.h"
+ #elif BUILDFLAG(IS_APPLE)
+ #include "media/capture/video/apple/gpu_memory_buffer_tracker_apple.h"
+-#elif BUILDFLAG(IS_LINUX) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD)
+ #include "media/capture/video/linux/v4l2_gpu_memory_buffer_tracker.h"
+ #elif BUILDFLAG(IS_WIN)
+ #include "media/capture/video/win/gpu_memory_buffer_tracker_win.h"
+@@ -42,7 +42,7 @@ VideoCaptureBufferTrackerFactoryImpl::CreateTracker(
+       return std::make_unique<GpuMemoryBufferTrackerCros>();
+ #elif BUILDFLAG(IS_APPLE)
+       return std::make_unique<GpuMemoryBufferTrackerApple>();
+-#elif BUILDFLAG(IS_LINUX) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD)
+       return std::make_unique<V4L2GpuMemoryBufferTracker>();
+ #elif BUILDFLAG(IS_WIN)
+       if (!dxgi_device_manager_) {
+diff --git a/media/filters/dav1d_video_decoder.cc b/media/filters/dav1d_video_decoder.cc
+index 9a10dbc..3bde5ce 100644
+--- a/media/filters/dav1d_video_decoder.cc
++++ b/media/filters/dav1d_video_decoder.cc
+@@ -432,14 +432,14 @@ bool Dav1dVideoDecoder::DecodeBuffer(scoped_refptr<DecoderBuffer> buffer) {
+   while (!input_buffer || input_buffer->sz) {
+     if (input_buffer) {
+       const int res = dav1d_send_data(dav1d_decoder_.get(), input_buffer.get());
+-      if (res < 0 && res != -EAGAIN) {
++      if (res < 0 && res != DAV1D_ERR(EAGAIN)) {
+         MEDIA_LOG(ERROR, media_log_)
+             << "dav1d_send_data() failed with error " << res << " on "
+             << buffer->AsHumanReadableString();
+         return false;
+       }
+ 
+-      if (res != -EAGAIN)
++      if (res != DAV1D_ERR(EAGAIN))
+         send_data_completed = true;
+ 
+       // Even if dav1d_send_data() returned EAGAIN, try dav1d_get_picture().
+@@ -451,7 +451,7 @@ bool Dav1dVideoDecoder::DecodeBuffer(scoped_refptr<DecoderBuffer> buffer) {
+ 
+     const int res = dav1d_get_picture(dav1d_decoder_.get(), p.get());
+     if (res < 0) {
+-      if (res != -EAGAIN) {
++      if (res != DAV1D_ERR(EAGAIN)) {
+         MEDIA_LOG(ERROR, media_log_)
+             << "dav1d_get_picture() failed with error " << res << " on "
+             << buffer->AsHumanReadableString();

@@ -77,6 +77,8 @@ subst build/rust/rust_bindgen_generator.gni '${LOCALBASE}/bin/rustfmt' "$RUSTFMT
 subst build/rust/rust_bindgen_generator.gni '${LOCALBASE}/llvm${MODCLANG_VERSION}' "$LIBCLANG_PREFIX"
 subst v8/BUILD.gn '${LOCALBASE}/llvm${MODCLANG_VERSION}/lib/clang/${MODCLANG_VERSION}' "$CLANG_RESOURCE_DIR"
 subst build/config/rust.gni '"/usr/local/bin/rustc"' "\"$RUSTC\""
+# Haiku patch 0006: Clang's builtin headers must come before GCC's.
+subst build/config/haiku/BUILD.gn '@CLANG_RESOURCE_DIR@' "$CLANG_RESOURCE_DIR"
 
 # Any FreeBSD placeholder left in a build file would silently produce a bogus
 # path; fail loudly instead so the substitution list above gets updated.
@@ -93,7 +95,29 @@ link "$GPERF"  third_party/gperf/cipd/bin/gperf
 link "$ESBUILD" third_party/devtools-frontend/src/third_party/esbuild/esbuild
 if [ -n "${TSGO:-}" ]; then
   link "$TSGO" third_party/typescript/linux-amd64/src/lib/tsc
+elif [ -n "${TSC:-}" ]; then
+  # No tsgo (a Go program) on Haiku: run the JavaScript TypeScript compiler
+  # (npm install -g typescript) through a wrapper. Its version differs from the
+  # tsgo pinned by Chromium, so type errors are reported but do not stop the
+  # build; the emitted JavaScript is what matters.
+  w=$SRC/third_party/typescript/linux-amd64/src/lib/tsc
+  mkdir -p "$(dirname "$w")"
+  cat > "$w" <<EOF_TSC
+#!/bin/sh
+# Written by scripts/prepare-tree.sh: tsgo stand-in for Haiku.
+"$TSC" "\$@" --noEmitOnError false
+rc=\$?
+[ \$rc -eq 0 ] || echo "tsc wrapper: ignoring tsc exit \$rc (TypeScript version skew)" >&2
+exit 0
+EOF_TSC
+  chmod +x "$w"
+  echo "third_party/typescript/linux-amd64/src/lib/tsc -> wrapper around $TSC"
 fi
+# FFmpeg picks its generated configuration by OS name; Haiku uses Linux's,
+# as FreeBSD does for itself.
+for brand in Chrome Chromium; do
+  link linux "third_party/ffmpeg/chromium/config/$brand/haiku"
+done
 if [ -n "${CLANG_FORMAT:-}" ]; then
   link "$CLANG_FORMAT" buildtools/haiku/clang-format
   link "$CLANG_FORMAT" buildtools/linux64/clang-format

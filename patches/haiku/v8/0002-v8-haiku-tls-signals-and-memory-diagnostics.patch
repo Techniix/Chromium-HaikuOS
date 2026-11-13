@@ -1,0 +1,163 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] v8: Haiku TLS model, signal context and memory diagnostics
+
+- src/common/thread-local-storage.h: Haiku links executables with
+  -shared, where the local-exec TLS model fails to link; use
+  local-dynamic, as on Android.
+- src/libsampler/sampler.cc, src/trap-handler/handler-inside-posix.h:
+  Haiku's ucontext layout and signal handling, as on FreeBSD.
+- src/base/platform/platform-posix.cc (diagnostics): when DecommitPages()
+  cannot map PROT_NONE over part of a reservation, log the address, size
+  and errno, then decommit in place (mprotect read/write, zero, madvise,
+  mprotect PROT_NONE). SetPermissions() failures are logged before V8
+  aborts.
+- src/base/bounded-page-allocator.cc, src/compiler/pipeline.cc,
+  src/sandbox/segmented-table.cc (diagnostics): each CHECK(success) gets
+  its own message, so the "Check failed: success." renderer crash seen
+  on Haiku names its source. Remove these once that crash is understood.
+---
+diff --git a/v8/src/base/bounded-page-allocator.cc b/v8/src/base/bounded-page-allocator.cc
+index e471714..80ad138 100644
+--- a/v8/src/base/bounded-page-allocator.cc
++++ b/v8/src/base/bounded-page-allocator.cc
+@@ -217,7 +217,7 @@ bool BoundedPageAllocator::FreePages(void* raw_address, size_t size) {
+     success = page_allocator_->DecommitPages(raw_address, size);
+     // Since we require zero-initialized pages, we must fail here if we cannot
+     // decomitt the range.
+-    CHECK(success);
++    CHECK_WITH_MSG(success, "Haiku: BoundedPageAllocator::FreePages decommit failed");
+   } else {
+     switch (page_freeing_mode_) {
+       case PageFreeingMode::kMakeInaccessible:
+diff --git a/v8/src/base/platform/platform-posix.cc b/v8/src/base/platform/platform-posix.cc
+index dbe2dd2..88c354f 100644
+--- a/v8/src/base/platform/platform-posix.cc
++++ b/v8/src/base/platform/platform-posix.cc
+@@ -80,6 +80,8 @@
+ 
+ #if V8_OS_HAIKU
+ #include <OS.h>  // find_thread, rename_thread
++#include <string.h>  // Chromium-HaikuOS: memset, strerror
++#include <atomic>
+ #endif
+ 
+ #if V8_OS_FREEBSD || V8_OS_DARWIN || V8_OS_BSD || V8_OS_SOLARIS
+@@ -573,6 +575,15 @@ bool OS::SetPermissions(void* address, size_t size, MemoryPermission access) {
+   // Any failure that's not OOM likely indicates a bug in the caller (e.g.
+   // using an invalid mapping) so attempt to catch that here to facilitate
+   // debugging of these failures.
++#if V8_OS_HAIKU
++  if (ret != 0) {  // Chromium-HaikuOS: say what failed before V8 aborts.
++    const int err = errno;
++    fprintf(stderr,
++            "[haiku-v8] SetPermissions(%p, %zu, prot=%d) failed: %s (%d)\n",
++            address, size, prot, strerror(err), err);
++    errno = err;
++  }
++#endif
+   if (ret != 0) CHECK_EQ(ENOMEM, errno);
+ 
+   // MacOS 11.2 on Apple Silicon refuses to switch permissions from
+@@ -691,6 +702,28 @@ bool OS::DecommitPages(void* address, size_t size) {
+   void* ret = mmap(address, size, PROT_NONE,
+                    MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+   if (V8_UNLIKELY(ret == MAP_FAILED)) {
++#if V8_OS_HAIKU
++    // Chromium-HaikuOS: replacing part of a reservation with a new mapping
++    // can fail on Haiku. Log it, then decommit in place instead: the
++    // caller needs the range inaccessible and zero-filled.
++    {
++      const int err = errno;
++      static std::atomic<int> logged{0};
++      if (logged.fetch_add(1, std::memory_order_relaxed) < 20) {
++        fprintf(stderr,
++                "[haiku-v8] DecommitPages(%p, %zu): mmap failed: %s (%d)\n",
++                address, size, strerror(err), err);
++      }
++      if (mprotect(address, size, PROT_READ | PROT_WRITE) == 0) {
++        memset(address, 0, size);
++        madvise(address, size, MADV_DONTNEED);
++        if (mprotect(address, size, PROT_NONE) == 0) return true;
++      }
++      fprintf(stderr, "[haiku-v8] DecommitPages fallback failed: %s\n",
++              strerror(errno));
++      return false;
++    }
++#endif
+     // Decommitting pages can fail if the limit of VMAs is exceeded.
+     CHECK_EQ(ENOMEM, errno);
+     return false;
+diff --git a/v8/src/common/thread-local-storage.h b/v8/src/common/thread-local-storage.h
+index a8e65ff..3d9030a 100644
+--- a/v8/src/common/thread-local-storage.h
++++ b/v8/src/common/thread-local-storage.h
+@@ -33,7 +33,7 @@
+ #else
+ #if defined(V8_TARGET_OS_WIN)
+ #define V8_TLS_MODEL "initial-exec"
+-#elif defined(V8_TARGET_OS_ANDROID)
++#elif defined(V8_TARGET_OS_ANDROID) || defined(__HAIKU__)
+ #define V8_TLS_MODEL "local-dynamic"
+ #else
+ #define V8_TLS_MODEL "local-exec"
+diff --git a/v8/src/compiler/pipeline.cc b/v8/src/compiler/pipeline.cc
+index 27f9007..8d546f3 100644
+--- a/v8/src/compiler/pipeline.cc
++++ b/v8/src/compiler/pipeline.cc
+@@ -2851,7 +2851,7 @@ Pipeline::GenerateCodeForWasmNativeStubFromTurboshaft(
+ 
+     const bool success = GenerateCodeFromTurboshaftGraph(
+         &linkage, turboshaft_pipeline, &pipeline, data.osr_helper_ptr());
+-    CHECK(success);
++    CHECK_WITH_MSG(success, "Haiku: wasm wrapper code generation failed (pipeline.cc)");
+ 
+     auto result =
+         WrapperCompilationResult(turboshaft_data.code_generator(),
+diff --git a/v8/src/libsampler/sampler.cc b/v8/src/libsampler/sampler.cc
+index a8a0f38..23bacb8 100644
+--- a/v8/src/libsampler/sampler.cc
++++ b/v8/src/libsampler/sampler.cc
+@@ -31,7 +31,7 @@
+ #include <mach/mach.h>
+ // OpenBSD doesn't have <ucontext.h>. ucontext_t lives in <signal.h>
+ // and is a typedef for struct sigcontext. There is no uc_mcontext.
+-#elif !V8_OS_OPENBSD
++#elif !V8_OS_OPENBSD && !V8_OS_HAIKU  // Haiku: ucontext_t is in <signal.h>
+ #include <ucontext.h>
+ #endif
+ 
+diff --git a/v8/src/sandbox/segmented-table.cc b/v8/src/sandbox/segmented-table.cc
+index 8d31f5b..ea41c42 100644
+--- a/v8/src/sandbox/segmented-table.cc
++++ b/v8/src/sandbox/segmented-table.cc
+@@ -155,7 +155,7 @@ void SegmentedTableBase::UnsealReadOnlySegments() {
+   const bool success = this->vas_->SetPagePermissions(
+       this->vas_->base(), read_only_reservation_size_,
+       PagePermissions::kReadWrite);
+-  CHECK(success);
++  CHECK_WITH_MSG(success, "Haiku: SegmentedTable unseal (kReadWrite) failed");
+ }
+ 
+ void SegmentedTableBase::SealReadOnlySegments() {
+@@ -163,7 +163,7 @@ void SegmentedTableBase::SealReadOnlySegments() {
+   if (read_only_reservation_size_ == 0) return;
+   const bool success = this->vas_->SetPagePermissions(
+       this->vas_->base(), read_only_reservation_size_, PagePermissions::kRead);
+-  CHECK(success);
++  CHECK_WITH_MSG(success, "Haiku: SegmentedTable seal (kRead) failed");
+ }
+ 
+ }  // namespace v8::internal
+diff --git a/v8/src/trap-handler/handler-inside-posix.h b/v8/src/trap-handler/handler-inside-posix.h
+index ef2f4ee..7ac4923 100644
+--- a/v8/src/trap-handler/handler-inside-posix.h
++++ b/v8/src/trap-handler/handler-inside-posix.h
+@@ -13,7 +13,7 @@ namespace v8 {
+ namespace internal {
+ namespace trap_handler {
+ 
+-#if V8_OS_LINUX || V8_OS_FREEBSD || V8_OS_OPENBSD
++#if V8_OS_LINUX || V8_OS_FREEBSD || V8_OS_OPENBSD || V8_OS_HAIKU
+ constexpr int kOobSignal = SIGSEGV;
+ #elif V8_OS_DARWIN
+ constexpr int kOobSignal = SIGBUS;

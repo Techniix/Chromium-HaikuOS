@@ -1,0 +1,153 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] base: small Haiku fixes found during the first full build
+
+- files/file_posix.cc: Haiku has futimens() and the POSIX.1-2008
+  st_atim/st_mtim/st_ctim fields, not the BSD st_*timespec names.
+- linux_util.cc: include <sstream> and base/logging.h, which the BSD
+  build gets transitively.
+- memory/protected_memory_posix.cc: the read-only check probes with
+  getrlimit(RLIMIT_NPROC); Haiku has no RLIMIT_NPROC, any resource works
+  for the EFAULT probe.
+- posix/can_lower_nice_to.cc: Haiku has no NZERO; use the usual 20.
+- process/launch_posix.cc: no /dev/fd or /proc fd directory; the
+  directory read fails and every descriptor is closed, which is correct.
+- process/process_metrics_posix.cc: default descriptor limit 1024.
+- process/set_process_title.cc: no setproctitle(); the team name comes
+  from argv[0].
+- profiler/module_cache_posix.cc: Haiku's <elf.h> calls PF_X PF_EXECUTE.
+---
+diff --git a/base/files/file_posix.cc b/base/files/file_posix.cc
+index 0298856..48c20fb 100644
+--- a/base/files/file_posix.cc
++++ b/base/files/file_posix.cc
+@@ -97,7 +97,7 @@ int CallFtruncate(PlatformFile file, int64_t length) {
+ }
+ 
+ int CallFutimes(PlatformFile file, const std::array<struct timeval, 2> times) {
+-#ifdef __USE_XOPEN2K8
++#if defined(__USE_XOPEN2K8) || BUILDFLAG(IS_HAIKU)
+   // futimens should be available, but futimes might not be
+   // http://pubs.opengroup.org/onlinepubs/9699919799/
+ 
+@@ -216,6 +216,13 @@ void File::Info::FromStat(const stat_wrapper_t& stat_info) {
+   int64_t last_accessed_nsec = stat_info.st_atimespec.tv_nsec;
+   time_t creation_time_sec = stat_info.st_birthtimespec.tv_sec;
+   int64_t creation_time_nsec = stat_info.st_birthtimespec.tv_nsec;
++#elif BUILDFLAG(IS_HAIKU)  // Haiku: POSIX.1-2008 st_*tim
++  time_t last_modified_sec = stat_info.st_mtim.tv_sec;
++  int64_t last_modified_nsec = stat_info.st_mtim.tv_nsec;
++  time_t last_accessed_sec = stat_info.st_atim.tv_sec;
++  int64_t last_accessed_nsec = stat_info.st_atim.tv_nsec;
++  time_t creation_time_sec = stat_info.st_ctim.tv_sec;
++  int64_t creation_time_nsec = stat_info.st_ctim.tv_nsec;
+ #elif (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
+   time_t last_modified_sec = stat_info.st_mtimespec.tv_sec;
+   int64_t last_modified_nsec = stat_info.st_mtimespec.tv_nsec;
+diff --git a/base/linux_util.cc b/base/linux_util.cc
+index 43fd469..9591b5e 100644
+--- a/base/linux_util.cc
++++ b/base/linux_util.cc
+@@ -15,6 +15,7 @@
+ 
+ #include <iomanip>
+ #include <memory>
++#include <sstream>
+ #include <string_view>
+ 
+ #include "base/base_export.h"
+@@ -22,6 +23,7 @@
+ #include "base/files/dir_reader_posix.h"
+ #include "base/files/file_util.h"
+ #include "base/files/scoped_file.h"
++#include "base/logging.h"
+ #include "base/strings/safe_sprintf.h"
+ #include "base/strings/span_printf.h"
+ #include "base/strings/string_number_conversions.h"
+diff --git a/base/memory/protected_memory_posix.cc b/base/memory/protected_memory_posix.cc
+index 03c698d..a8e5cf9 100644
+--- a/base/memory/protected_memory_posix.cc
++++ b/base/memory/protected_memory_posix.cc
+@@ -33,6 +33,10 @@ bool SetMemory(void* start, void* end, int prot) {
+ 
+ }  // namespace
+ 
++#if !defined(RLIMIT_NPROC)  // Haiku: any rlimit works for the EFAULT probe
++#define RLIMIT_NPROC RLIMIT_NOFILE
++#endif
++
+ namespace internal {
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
+ void CheckMemoryReadOnly(const void* ptr) {
+diff --git a/base/posix/can_lower_nice_to.cc b/base/posix/can_lower_nice_to.cc
+index 8979af2..0d9a8f8 100644
+--- a/base/posix/can_lower_nice_to.cc
++++ b/base/posix/can_lower_nice_to.cc
+@@ -9,6 +9,10 @@
+ #include <sys/types.h>
+ #include <unistd.h>
+ 
++#if !defined(NZERO)  // Haiku
++#define NZERO 20
++#endif
++
+ #include "build/build_config.h"
+ 
+ #if BUILDFLAG(IS_FREEBSD)
+diff --git a/base/process/launch_posix.cc b/base/process/launch_posix.cc
+index 99427d5..eff45b6 100644
+--- a/base/process/launch_posix.cc
++++ b/base/process/launch_posix.cc
+@@ -212,6 +212,9 @@ static const char kFDDir[] = "/dev/fd";
+ static const char kFDDir[] = "/dev/fd";
+ #elif BUILDFLAG(IS_ANDROID)
+ static const char kFDDir[] = "/proc/self/fd";
++#elif BUILDFLAG(IS_HAIKU)
++// No fd directory on Haiku; DirReaderPosix fails and we close every fd.
++static const char kFDDir[] = "/dev/fd";
+ #endif
+ 
+ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
+diff --git a/base/process/process_metrics_posix.cc b/base/process/process_metrics_posix.cc
+index ab85f24..f137737 100644
+--- a/base/process/process_metrics_posix.cc
++++ b/base/process/process_metrics_posix.cc
+@@ -60,6 +60,8 @@ static const rlim_t kSystemDefaultMaxFds = 256;
+ static const rlim_t kSystemDefaultMaxFds = 1024;
+ #elif BUILDFLAG(IS_AIX)
+ static const rlim_t kSystemDefaultMaxFds = 8192;
++#elif BUILDFLAG(IS_HAIKU)
++static const rlim_t kSystemDefaultMaxFds = 1024;
+ #endif
+ 
+ size_t GetMaxFds() {
+diff --git a/base/process/set_process_title.cc b/base/process/set_process_title.cc
+index aacd4a8..f23308d 100644
+--- a/base/process/set_process_title.cc
++++ b/base/process/set_process_title.cc
+@@ -4,6 +4,11 @@
+ 
+ #include "build/build_config.h"
+ 
++#if BUILDFLAG(IS_HAIKU)
++// No setproctitle() on Haiku; the team name comes from argv[0].
++#define setproctitle(...) ((void)0)
++#endif
++
+ // Define _GNU_SOURCE to ensure that <errno.h> defines
+ // program_invocation_short_name. Keep this at the top of the file since some
+ // system headers might include <errno.h> and the header could be skipped on
+diff --git a/base/profiler/module_cache_posix.cc b/base/profiler/module_cache_posix.cc
+index 54c48a1..68aad80 100644
+--- a/base/profiler/module_cache_posix.cc
++++ b/base/profiler/module_cache_posix.cc
+@@ -7,6 +7,10 @@
+ #include <dlfcn.h>
+ #include <elf.h>
+ 
++#if !defined(PF_X)  // Haiku's <elf.h> calls it PF_EXECUTE
++#define PF_X 0x1
++#endif
++
+ #include <optional>
+ #include <string_view>
+ 

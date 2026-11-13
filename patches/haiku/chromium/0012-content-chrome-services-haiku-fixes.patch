@@ -1,0 +1,258 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] content, chrome, services: Haiku fixes for the browser build
+
+- content/browser/file_system_access/file_path_watcher: Haiku has
+  neither the inotify nor the kqueue watcher; provide the same no-op
+  backend as file_path_watcher_stub.cc (Watch() reports failure).
+- content/browser/renderer_host/render_process_host_impl.cc: no
+  RLIMIT_NPROC; report an unknown process limit.
+- content/services/isolated_xr_device, services/network sandbox hooks,
+  sandbox/policy/mojom/sandbox.mojom: use the shared BSD sandbox
+  declarations, and give Haiku the kVideoCapture sandbox type.
+- sandbox/linux/services/proc_util.cc: Haiku's struct dirent has no
+  d_type.
+- chrome/browser/about_flags.cc: no "audio-backend" flag on Haiku (it
+  selects between sndio and PulseAudio).
+- chrome/browser/notifications/notification_platform_bridge_linux.cc:
+  skip the icon-bytes path that needs memfd (MFD_CLOEXEC).
+- components/crash: crashpad's handler is not available on Haiku.
+- components/device_signals: LLADDR() returns a different pointer type.
+- components/update_client: "haiku" as the OS name.
+- services/device/usb: no USB backend on Haiku yet.
+- third_party/blink: Haiku links executables as shared objects (-shared),
+  where the local-exec TLS model cannot be linked (R_X86_64_TPOFF32); use
+  local-dynamic for Blink's heap TLS, as Android does. Stack bounds come
+  from pthread_getattr_np(), as on Linux and FreeBSD.
+---
+diff --git a/chrome/browser/about_flags.cc b/chrome/browser/about_flags.cc
+index 5ca50ba..c70ad99 100644
+--- a/chrome/browser/about_flags.cc
++++ b/chrome/browser/about_flags.cc
+@@ -6171,7 +6171,7 @@ const FeatureEntry kFeatureEntries[] = {
+      flag_descriptions::kWaylandSessionManagementDescription, kOsLinux,
+      FEATURE_VALUE_TYPE(features::kWaylandSessionManagement)},
+ 
+-#if (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#if BUILDFLAG(IS_BSD)  // Haiku: no audio-backend flag
+     {"audio-backend",
+      flag_descriptions::kAudioBackendName,
+      flag_descriptions::kAudioBackendDescription, kOsLinux,
+diff --git a/chrome/browser/notifications/notification_platform_bridge_linux.cc b/chrome/browser/notifications/notification_platform_bridge_linux.cc
+index 7147ce3..e5acbb8 100644
+--- a/chrome/browser/notifications/notification_platform_bridge_linux.cc
++++ b/chrome/browser/notifications/notification_platform_bridge_linux.cc
+@@ -369,7 +369,7 @@ NotificationResources WriteNotificationResourceFiles(
+   result.has_icon = WriteImageFile(icon, dir_path.Append("icon.png"));
+   result.has_image = WriteImageFile(image, dir_path.Append("image.png"));
+   // XXX
+-#if !BUILDFLAG(IS_OPENBSD)
++#if !BUILDFLAG(IS_OPENBSD) && !BUILDFLAG(IS_HAIKU)
+   if (result.has_icon) {
+     result.icon_bytes = icon;
+     if (icon && icon->size() > 0) {
+diff --git a/components/crash/core/app/chrome_crashpad_handler.cc b/components/crash/core/app/chrome_crashpad_handler.cc
+index 9aa752e..d5e39bc 100644
+--- a/components/crash/core/app/chrome_crashpad_handler.cc
++++ b/components/crash/core/app/chrome_crashpad_handler.cc
+@@ -6,7 +6,7 @@
+ extern "C" int CrashpadHandlerMain(int argc, char* argv[]);
+ 
+ int main(int argc, char* argv[]) {
+-#if defined(__OpenBSD__) || defined(__FreeBSD__)
++#if defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__HAIKU__)
+   return -1;
+ #else
+   return CrashpadHandlerMain(argc, argv);
+diff --git a/components/device_signals/core/common/linux/platform_utils_linux.cc b/components/device_signals/core/common/linux/platform_utils_linux.cc
+index 3ff72b9..c6647e9 100644
+--- a/components/device_signals/core/common/linux/platform_utils_linux.cc
++++ b/components/device_signals/core/common/linux/platform_utils_linux.cc
+@@ -186,7 +186,7 @@ std::vector<std::string> internal::GetMacAddressesImpl() {
+         reinterpret_cast<struct sockaddr_dl*>(interface->ifa_addr);
+     if (!sdl || sdl->sdl_alen != 6)
+       continue;
+-    char* link_address = static_cast<char*>(LLADDR(sdl));
++    char* link_address = reinterpret_cast<char*>(LLADDR(sdl));
+     result.push_back(base::StringPrintf(
+         "%02x:%02x:%02x:%02x:%02x:%02x", link_address[0] & 0xff,
+         link_address[1] & 0xff, link_address[2] & 0xff, link_address[3] & 0xff,
+diff --git a/components/update_client/update_query_params.cc b/components/update_client/update_query_params.cc
+index e35f2db..fc12866 100644
+--- a/components/update_client/update_query_params.cc
++++ b/components/update_client/update_query_params.cc
+@@ -41,6 +41,8 @@ constexpr std::string_view kOs =
+     "openbsd";
+ #elif defined(OS_FREEBSD)
+     "freebsd";
++#elif BUILDFLAG(IS_HAIKU)
++    "haiku";
+ #else
+ #error "unknown os"
+ #endif
+diff --git a/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc b/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc
+index 08a1812..741297e 100644
+--- a/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc
++++ b/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc
+@@ -151,3 +151,40 @@ size_t FilePathWatcher::quota_limit() {
+ }
+ 
+ }  // namespace content
++
++// Chromium-HaikuOS: no file watching backend on Haiku yet. Same behaviour
++// as file_path_watcher_stub.cc (Watch() reports failure).
++#include "build/build_config.h"
++#if BUILDFLAG(IS_HAIKU)
++#include <limits>
++#include <memory>
++#include "base/notimplemented.h"
++namespace content {
++namespace {
++class HaikuFilePathWatcherImpl : public FilePathWatcher::PlatformDelegate {
++ public:
++  HaikuFilePathWatcherImpl() = default;
++  HaikuFilePathWatcherImpl(const HaikuFilePathWatcherImpl&) = delete;
++  HaikuFilePathWatcherImpl& operator=(const HaikuFilePathWatcherImpl&) =
++      delete;
++  ~HaikuFilePathWatcherImpl() override = default;
++
++  bool Watch(const base::FilePath& path,
++             Type type,
++             const FilePathWatcher::Callback& callback) override {
++    NOTIMPLEMENTED_LOG_ONCE();
++    return false;
++  }
++  void Cancel() override { set_cancelled(); }
++};
++}  // namespace
++
++FilePathWatcher::FilePathWatcher()
++    : FilePathWatcher(std::make_unique<HaikuFilePathWatcherImpl>()) {}
++
++// static
++size_t FilePathWatcher::GetQuotaLimitImpl() {
++  return std::numeric_limits<size_t>::max();
++}
++}  // namespace content
++#endif  // BUILDFLAG(IS_HAIKU)
+diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
+index e7cb32e..23033f5 100644
+--- a/content/browser/renderer_host/render_process_host_impl.cc
++++ b/content/browser/renderer_host/render_process_host_impl.cc
+@@ -1200,7 +1200,9 @@ static constexpr size_t kUnknownPlatformProcessLimit = 0;
+ // to indicate failure and std::numeric_limits<size_t>::max() to indicate
+ // unlimited.
+ size_t GetPlatformProcessLimit() {
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#if BUILDFLAG(IS_HAIKU)
++  return kUnknownPlatformProcessLimit;  // no RLIMIT_NPROC on Haiku
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
+   struct rlimit limit;
+   if (getrlimit(RLIMIT_NPROC, &limit) != 0)
+     return kUnknownPlatformProcessLimit;
+diff --git a/content/services/isolated_xr_device/xr_sandbox_hook_linux.h b/content/services/isolated_xr_device/xr_sandbox_hook_linux.h
+index be81f5c..a077724 100644
+--- a/content/services/isolated_xr_device/xr_sandbox_hook_linux.h
++++ b/content/services/isolated_xr_device/xr_sandbox_hook_linux.h
+@@ -9,7 +9,7 @@
+ #include <string>
+ #include <string_view>
+ 
+-#if defined(__OpenBSD__) || defined(__FreeBSD__)
++#if defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__HAIKU__)
+ #include "sandbox/policy/sandbox.h"
+ #else
+ #include "sandbox/policy/linux/sandbox_linux.h"
+diff --git a/sandbox/linux/services/proc_util.cc b/sandbox/linux/services/proc_util.cc
+index 7cebb06..5caa275 100644
+--- a/sandbox/linux/services/proc_util.cc
++++ b/sandbox/linux/services/proc_util.cc
+@@ -102,7 +102,13 @@ bool ProcUtil::HasOpenDirectory(int proc_fd) {
+     int stat_res = fstatat(proc_self_fd, de->d_name, &s, 0);
+     // Check for stale symlinks and skip them if they meet certain criteria.
+     // See crbug.com/362595425
+-    if (stat_res == -1 && errno == ESTALE && de->d_type == DT_LNK) {
++    if (stat_res == -1 && errno == ESTALE &&
++#if BUILDFLAG(IS_HAIKU) // no d_type
++        false
++#else
++        de->d_type == DT_LNK
++#endif
++        ) {
+       static constexpr std::string_view kStalePrefix = "/google/cog/";
+       std::array<char, PATH_MAX> filename;
+       const ssize_t len = readlinkat(proc_self_fd, de->d_name, filename.data(),
+diff --git a/sandbox/policy/mojom/sandbox.mojom b/sandbox/policy/mojom/sandbox.mojom
+index 43142a0..f38800b 100644
+--- a/sandbox/policy/mojom/sandbox.mojom
++++ b/sandbox/policy/mojom/sandbox.mojom
+@@ -80,6 +80,9 @@ enum Sandbox {
+   [EnableIf=is_freebsd]
+   kVideoCapture,
+ 
++  [EnableIf=is_haiku]
++  kVideoCapture,
++
+   // Allows access to file contents and Windows APIs for parsing icons from PE
+   // files.
+   [EnableIf=is_win] kIconReader,
+diff --git a/services/device/usb/usb_service.cc b/services/device/usb/usb_service.cc
+index 3e01725..574a878 100644
+--- a/services/device/usb/usb_service.cc
++++ b/services/device/usb/usb_service.cc
+@@ -57,6 +57,8 @@ std::unique_ptr<UsbService> UsbService::Create() {
+   return base::WrapUnique(new UsbServiceWin());
+ #elif BUILDFLAG(IS_MAC)
+   return base::WrapUnique(new UsbServiceImpl());
++#elif BUILDFLAG(IS_HAIKU)
++  return nullptr;  // No USB backend on Haiku yet.
+ #elif (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
+   return base::WrapUnique(new UsbServiceImpl());
+ #else
+diff --git a/services/network/network_sandbox_hook_linux.h b/services/network/network_sandbox_hook_linux.h
+index 9d39bb7..3e60dd5 100644
+--- a/services/network/network_sandbox_hook_linux.h
++++ b/services/network/network_sandbox_hook_linux.h
+@@ -6,7 +6,7 @@
+ #define SERVICES_NETWORK_NETWORK_SANDBOX_HOOK_LINUX_H_
+ 
+ #include "base/component_export.h"
+-#if defined(__OpenBSD__) || defined(__FreeBSD__)
++#if defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__HAIKU__)
+ #include "sandbox/policy/sandbox.h"
+ #else
+ #include "sandbox/policy/linux/sandbox_linux.h"
+diff --git a/third_party/blink/renderer/platform/heap/thread_local.h b/third_party/blink/renderer/platform/heap/thread_local.h
+index 8133da0..586752a 100644
+--- a/third_party/blink/renderer/platform/heap/thread_local.h
++++ b/third_party/blink/renderer/platform/heap/thread_local.h
+@@ -39,7 +39,7 @@
+ #else
+ #if BUILDFLAG(IS_WIN)
+ #define BLINK_HEAP_THREAD_LOCAL_MODEL "initial-exec"
+-#elif BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_HAIKU)
+ #define BLINK_HEAP_THREAD_LOCAL_MODEL "local-dynamic"
+ #else
+ #define BLINK_HEAP_THREAD_LOCAL_MODEL "local-exec"
+diff --git a/third_party/blink/renderer/platform/wtf/stack_util.cc b/third_party/blink/renderer/platform/wtf/stack_util.cc
+index a91e322..26f40f1 100644
+--- a/third_party/blink/renderer/platform/wtf/stack_util.cc
++++ b/third_party/blink/renderer/platform/wtf/stack_util.cc
+@@ -39,7 +39,7 @@ size_t GetUnderestimatedStackSize() {
+ // correctly for the main thread.
+ 
+ #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
+-    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_HAIKU)
+   // pthread_getattr_np() can fail if the thread is not invoked by
+   // pthread_create() (e.g., the main thread of blink_unittests).
+   // If so, a conservative size estimate is returned.
+@@ -114,7 +114,7 @@ thread_local void* thread_stack_start = nullptr;
+ 
+ void* GetStackStartImpl() {
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
+-    BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_HAIKU)
+   pthread_attr_t attr;
+   int error;
+ #if BUILDFLAG(IS_FREEBSD)

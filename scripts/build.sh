@@ -25,6 +25,11 @@ TARGETS=("$@")
 . "$HERE/scripts/detect-toolchain.sh"
 
 export CC=$CLANG CXX=$CLANGXX AR=$LLVM_AR NM=${LLVM_AR%-ar}-nm
+# Chromium's Rust code uses unstable features of the stable toolchain.
+export RUSTC_BOOTSTRAP=1
+# Stub pkg-config entries for libraries Haiku lacks that GN only queries
+# (atspi-2, dri, gbm); see prebuilt/pkgconfig.
+export PKG_CONFIG_PATH="$HERE/prebuilt/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
 cd "$SRC"
 mkdir -p "$OUT"
@@ -45,11 +50,39 @@ echo "==> Writing $OUT/args.gn"
 sed -e "s|@CLANG_BASE_PATH@|$CLANG_BASE_PATH|" \
     -e "s|@RUST_SYSROOT@|$RUST_SYSROOT|" \
     -e "s|@RUSTC_VERSION@|$RUSTC_VERSION|" \
-    -e "s|@LIBCLANG_SO@|$(ls "$LIBCLANG_PREFIX"/lib/libclang.so* | head -1)|" \
+    -e "s|@LIBCLANG_SO@|$(ls "$LIBCLANG_PREFIX"/lib/libclang.so.$("$CLANG" -dumpversion | cut -d. -f1)* 2>/dev/null | head -1)|" \
     -e "s|@LIBCLANG_BINDINGS_DIR@|$LIBCLANG_BINDINGS_DIR|" \
     "$HERE/scripts/args.gn.in" > "$OUT/args.gn"
 if [ -n "${EXTRA_GN_ARGS:-}" ]; then
   printf '\n# EXTRA_GN_ARGS\n%s\n' "$EXTRA_GN_ARGS" >> "$OUT/args.gn"
+fi
+
+# --- Haiku helper library -----------------------------------------------------
+# build/config/haiku/compat/lib (Haiku patch 0006/0011) holds C and C++ helpers
+# that GN cannot build: the Media Kit audio shim must be compiled against
+# Haiku's own headers and libstdc++, not Chromium's libc++. libm.a there is a
+# linker script that pulls libhaikucompat.a (and libgnu, libmedia, libbe) into
+# every link.
+COMPAT=$SRC/build/config/haiku/compat/lib
+if [ ! -f "$COMPAT/libhaikucompat.a" ] ||
+   [ "$COMPAT/haiku_cxa_thread_atexit.c" -nt "$COMPAT/libhaikucompat.a" ] ||
+   [ "$COMPAT/haiku_media_audio.cpp" -nt "$COMPAT/libhaikucompat.a" ]; then
+  echo "==> Building libhaikucompat.a"
+  [ -n "${SYS_CXX:-}" ] || { echo "No system C++ compiler (g++) for the Media Kit shim." >&2; exit 1; }
+  ( cd "$COMPAT"
+    "$CLANG" -fPIC -O2 -c haiku_cxa_thread_atexit.c -o haiku_cxa_thread_atexit.o
+    "$SYS_CXX" -fPIC -O2 -fno-exceptions -fno-rtti -fno-sized-deallocation \
+        -c haiku_media_audio.cpp -o haiku_media_audio.o
+    rm -f libhaikucompat.a
+    "$LLVM_AR" rcs libhaikucompat.a haiku_cxa_thread_atexit.o haiku_media_audio.o )
+fi
+
+# --- Pregenerated Tint sources -----------------------------------------------
+# Tint's generator needs Go >= 1.26 (not available on Haiku); see docs/TINT.md.
+if [ ! -f "$OUT/gen/src/tint/lang/core/enums.cc" ]; then
+  echo "==> Unpacking pregenerated Tint sources into $OUT/gen"
+  mkdir -p "$OUT/gen"
+  tar -xzf "$HERE/prebuilt/tint-gen.tar.gz" -C "$OUT/gen"
 fi
 
 echo "==> gn gen $OUT"

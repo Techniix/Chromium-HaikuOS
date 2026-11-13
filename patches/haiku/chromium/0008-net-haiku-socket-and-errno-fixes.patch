@@ -1,0 +1,408 @@
+From: Chromium-HaikuOS contributors
+Subject: [PATCH] net: Haiku socket options, errno values and peer credentials
+
+- base/net_errors_posix.cc: several POSIX error names used in
+  MapSystemError() are not defined by Haiku; every case is guarded with
+  #ifdef.
+- socket/udp_socket_posix.cc: Haiku has no IPV6_TCLASS,
+  IPV6_RECVTCLASS or SO_TIMESTAMP; define them as option numbers that
+  make setsockopt() fail cleanly (so the callers' existing error paths
+  run) and never match a received control message. Haiku has only
+  struct ip_mreq; provide Linux's ip_mreqn layout. recvmmsg() is not
+  used on Haiku.
+- socket/unix_domain_server_socket_posix.cc,
+  components/named_mojo_ipc_server/connection_info.h: no getpeereid()
+  and no struct ucred; use SO_PEERCRED where the kernel has it, and fail
+  the credential check cleanly otherwise.
+- dns/address_sorter_posix.cc: the BSD path reads IPv6 address flags
+  with the SIOCGIFAFLAG_IN6 ioctl, which Haiku does not have; Haiku takes
+  the generic path.
+- third_party/webrtc/rtc_base/physical_socket_server.cc: same option
+  stubs as UDPSocketPosix.
+
+Known limitation: QUIC (HTTP/3) fails on stock Haiku because sendmsg()
+with control messages is refused with EOPNOTSUPP on UDP sockets. Run with
+--disable-quic (scripts/run-chromium.sh does).
+---
+diff --git a/components/named_mojo_ipc_server/connection_info.h b/components/named_mojo_ipc_server/connection_info.h
+index cefc83a..fa6c5fe 100644
+--- a/components/named_mojo_ipc_server/connection_info.h
++++ b/components/named_mojo_ipc_server/connection_info.h
+@@ -16,12 +16,32 @@
+ #elif BUILDFLAG(IS_MAC)
+ #include <bsm/libbsm.h>
+ #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD)
++#if !BUILDFLAG(IS_HAIKU)
+ #include <sys/ucred.h>
++#endif
++#include <sys/socket.h>
+ #include <sys/socket.h>
+ #endif
+ 
++#if BUILDFLAG(IS_HAIKU)
++#include <sys/types.h>
++#include <sys/socket.h>
++#if !defined(SO_PEERCRED)
++#define SO_PEERCRED (-1)  // getsockopt() fails cleanly
++#endif
++#endif
++
+ namespace named_mojo_ipc_server {
+ 
++#if BUILDFLAG(IS_HAIKU)
++// Haiku: no struct ucred in its headers; same layout as SO_PEERCRED's.
++struct ucred {
++  pid_t pid;
++  uid_t uid;
++  gid_t gid;
++};
++#endif
++
+ // ConnectionInfo encapsulates information useful for verifying a potential
+ // endpoint.
+ struct ConnectionInfo {
+@@ -33,7 +53,7 @@ struct ConnectionInfo {
+   base::ProcessId pid{};
+ #if BUILDFLAG(IS_MAC)
+   audit_token_t audit_token{};
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_HAIKU) // ucred
+   ucred credentials{};
+ #elif BUILDFLAG(IS_FREEBSD)
+   xucred credentials{};
+diff --git a/net/base/net_errors_posix.cc b/net/base/net_errors_posix.cc
+index df49829..c13a805 100644
+--- a/net/base/net_errors_posix.cc
++++ b/net/base/net_errors_posix.cc
+@@ -23,98 +23,194 @@ Error MapSystemError(logging::SystemErrorCode os_error) {
+   // There are numerous posix error codes, but these are the ones we thus far
+   // find interesting.
+   switch (os_error) {
++#ifdef EAGAIN
+     case EAGAIN:
++#endif
+ #if EWOULDBLOCK != EAGAIN
++#ifdef EWOULDBLOCK
+     case EWOULDBLOCK:
++#endif
+ #endif
+       return ERR_IO_PENDING;
++#ifdef EACCES
+     case EACCES:
++#endif
+       return ERR_ACCESS_DENIED;
++#ifdef ENETDOWN
+     case ENETDOWN:
++#endif
+       return ERR_INTERNET_DISCONNECTED;
++#ifdef ETIMEDOUT
+     case ETIMEDOUT:
++#endif
+       return ERR_TIMED_OUT;
++#ifdef ECONNRESET
+     case ECONNRESET:
++#endif
++#ifdef ENETRESET
+     case ENETRESET:  // Related to keep-alive.
++#endif
++#ifdef EPIPE
+     case EPIPE:
++#endif
+       return ERR_CONNECTION_RESET;
++#ifdef ECONNABORTED
+     case ECONNABORTED:
++#endif
+       return ERR_CONNECTION_ABORTED;
++#ifdef ECONNREFUSED
+     case ECONNREFUSED:
++#endif
+       return ERR_CONNECTION_REFUSED;
++#ifdef EHOSTUNREACH
+     case EHOSTUNREACH:
++#endif
++#ifdef EHOSTDOWN
+     case EHOSTDOWN:
++#endif
++#ifdef ENETUNREACH
+     case ENETUNREACH:
++#endif
++#ifdef EAFNOSUPPORT
+     case EAFNOSUPPORT:
++#endif
+       return ERR_ADDRESS_UNREACHABLE;
++#ifdef EADDRNOTAVAIL
+     case EADDRNOTAVAIL:
++#endif
+       return ERR_ADDRESS_INVALID;
++#ifdef EMSGSIZE
+     case EMSGSIZE:
++#endif
+       return ERR_MSG_TOO_BIG;
++#ifdef ENOTCONN
+     case ENOTCONN:
++#endif
+       return ERR_SOCKET_NOT_CONNECTED;
++#ifdef EISCONN
+     case EISCONN:
++#endif
+       return ERR_SOCKET_IS_CONNECTED;
++#ifdef EINVAL
+     case EINVAL:
++#endif
+       return ERR_INVALID_ARGUMENT;
++#ifdef EADDRINUSE
+     case EADDRINUSE:
++#endif
+       return ERR_ADDRESS_IN_USE;
++#ifdef E2BIG
+     case E2BIG:  // Argument list too long.
++#endif
+       return ERR_INVALID_ARGUMENT;
++#ifdef EBADF
+     case EBADF:  // Bad file descriptor.
++#endif
+       return ERR_INVALID_HANDLE;
++#ifdef EBUSY
+     case EBUSY:  // Device or resource busy.
++#endif
+       return ERR_INSUFFICIENT_RESOURCES;
++#ifdef ECANCELED
+     case ECANCELED:  // Operation canceled.
++#endif
+       return ERR_ABORTED;
++#ifdef EDEADLK
+     case EDEADLK:  // Resource deadlock avoided.
++#endif
+       return ERR_INSUFFICIENT_RESOURCES;
++#ifdef EDQUOT
+     case EDQUOT:  // Disk quota exceeded.
++#endif
+       return ERR_FILE_NO_SPACE;
++#ifdef EEXIST
+     case EEXIST:  // File exists.
++#endif
+       return ERR_FILE_EXISTS;
++#ifdef EFAULT
+     case EFAULT:  // Bad address.
++#endif
+       return ERR_INVALID_ARGUMENT;
++#ifdef EFBIG
+     case EFBIG:  // File too large.
++#endif
+       return ERR_FILE_TOO_BIG;
++#ifdef EISDIR
+     case EISDIR:  // Operation not allowed for a directory.
++#endif
+       return ERR_ACCESS_DENIED;
++#ifdef ENAMETOOLONG
+     case ENAMETOOLONG:  // Filename too long.
++#endif
+       return ERR_FILE_PATH_TOO_LONG;
++#ifdef ENFILE
+     case ENFILE:  // Too many open files in system.
++#endif
+       return ERR_INSUFFICIENT_RESOURCES;
++#ifdef ENOBUFS
+     case ENOBUFS:  // No buffer space available.
++#endif
+       return ERR_NO_BUFFER_SPACE;
++#ifdef ENODEV
+     case ENODEV:  // No such device.
++#endif
+       return ERR_INVALID_ARGUMENT;
++#ifdef ENOENT
+     case ENOENT:  // No such file or directory.
++#endif
+       return ERR_FILE_NOT_FOUND;
++#ifdef ENOLCK
+     case ENOLCK:  // No locks available.
++#endif
+       return ERR_INSUFFICIENT_RESOURCES;
++#ifdef ENOMEM
+     case ENOMEM:  // Not enough space.
++#endif
+       return ERR_OUT_OF_MEMORY;
++#ifdef ENOSPC
+     case ENOSPC:  // No space left on device.
++#endif
+       return ERR_FILE_NO_SPACE;
++#ifdef ENOSYS
+     case ENOSYS:  // Function not implemented.
++#endif
+       return ERR_NOT_IMPLEMENTED;
++#ifdef ENOTDIR
+     case ENOTDIR:  // Not a directory.
++#endif
+       return ERR_FILE_NOT_FOUND;
++#ifdef ENOTSUP
+     case ENOTSUP:  // Operation not supported.
++#endif
+       return ERR_NOT_IMPLEMENTED;
++#ifdef EPERM
+     case EPERM:  // Operation not permitted.
++#endif
+       return ERR_ACCESS_DENIED;
++#ifdef EROFS
+     case EROFS:  // Read-only file system.
++#endif
+       return ERR_ACCESS_DENIED;
++#ifdef ETXTBSY
+     case ETXTBSY:  // Text file busy.
++#endif
+       return ERR_ACCESS_DENIED;
++#ifdef EUSERS
+     case EUSERS:  // Too many users.
++#endif
+       return ERR_INSUFFICIENT_RESOURCES;
++#ifdef EMFILE
+     case EMFILE:  // Too many open files.
++#endif
+       return ERR_INSUFFICIENT_RESOURCES;
++#ifdef ENOPROTOOPT
+     case ENOPROTOOPT:  // Protocol option not supported.
++#endif
+       return ERR_NOT_IMPLEMENTED;
+ #if BUILDFLAG(IS_FUCHSIA)
++#ifdef EIO
+     case EIO:
++#endif
+       // FDIO maps all unrecognized errors to EIO. If you see this message then
+       // consider adding custom error in FDIO for the corresponding error.
+       DLOG(FATAL) << "EIO was returned by FDIO.";
+diff --git a/net/dns/address_sorter_posix.cc b/net/dns/address_sorter_posix.cc
+index 80b35bb..fea29f4 100644
+--- a/net/dns/address_sorter_posix.cc
++++ b/net/dns/address_sorter_posix.cc
+@@ -13,7 +13,7 @@
+ 
+ #include "build/build_config.h"
+ 
+-#if BUILDFLAG(IS_APPLE) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
+ #include <sys/socket.h>  // Must be included before ifaddrs.h.
+ #include <ifaddrs.h>
+ #include <net/if.h>
+@@ -516,7 +516,7 @@ void AddressSorterPosix::OnIPAddressChanged(
+     info.prefix_length = msg.ifa_prefixlen;
+     FillPolicy(address, &info);
+   }
+-#elif BUILDFLAG(IS_APPLE) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#elif BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_BSD)
+   // It's not clear we will receive notification when deprecated flag changes.
+   // Socket for ioctl.
+   int ioctl_socket = socket(AF_INET6, SOCK_DGRAM, 0);
+diff --git a/net/socket/udp_socket_posix.cc b/net/socket/udp_socket_posix.cc
+index 4eb2d73..20bf2cd 100644
+--- a/net/socket/udp_socket_posix.cc
++++ b/net/socket/udp_socket_posix.cc
+@@ -84,6 +84,36 @@
+ #define CMSG_ALIGN(n) _ALIGN(n)
+ #endif
+ 
++#if defined(__HAIKU__)
++// Haiku has no IPv6 traffic class or socket timestamps. Unknown option
++// numbers make those setsockopt()s fail cleanly; the cmsg checks never match.
++#ifndef IPV6_TCLASS
++#define IPV6_TCLASS (-1)
++#endif
++#ifndef IPV6_RECVTCLASS
++#define IPV6_RECVTCLASS (-2)
++#endif
++#ifndef SO_TIMESTAMP
++#define SO_TIMESTAMP (-3)
++#endif
++#ifndef SCM_TIMESTAMP
++#define SCM_TIMESTAMP SO_TIMESTAMP
++#endif
++#endif  // __HAIKU__
++
++#if defined(__HAIKU__)
++// Haiku has only struct ip_mreq; this matches Linux's layout, whose leading
++// part is ip_mreq (group, interface address).
++struct ip_mreqn {
++  struct in_addr imr_multiaddr;
++  struct in_addr imr_address;
++  int imr_ifindex;
++};
++#ifndef IP_DEFAULT_MULTICAST_TTL
++#define IP_DEFAULT_MULTICAST_TTL 1
++#endif
++#endif  // __HAIKU__
++
+ namespace net {
+ 
+ namespace {
+@@ -1184,7 +1214,7 @@ base::expected<DatagramsMetadata, Error> UDPSocketPosix::InternalReadMultiple(
+   if (socket_ == kInvalidSocket) {
+     return base::unexpected(ERR_SOCKET_NOT_CONNECTED);
+   }
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_BSD)  // Haiku: no recvmmsg
+   if (gro_status_ == GroStatus::kEnabled) {
+     return InternalReadMultipleWithGro(buffer, buf_len, maximum_packet_size);
+   }
+@@ -1195,7 +1225,7 @@ base::expected<DatagramsMetadata, Error> UDPSocketPosix::InternalReadMultiple(
+ #endif
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_BSD)  // Haiku: no recvmmsg
+ base::expected<DatagramsMetadata, Error> UDPSocketPosix::InternalRecvMmsg(
+     IOBuffer* buffer,
+     size_t num_messages,
+diff --git a/net/socket/unix_domain_server_socket_posix.cc b/net/socket/unix_domain_server_socket_posix.cc
+index 4cb79bd..918ddf3 100644
+--- a/net/socket/unix_domain_server_socket_posix.cc
++++ b/net/socket/unix_domain_server_socket_posix.cc
+@@ -46,6 +46,23 @@ bool UnixDomainServerSocket::GetPeerCredentials(SocketDescriptor socket,
+   credentials->user_id = user_cred.uid;
+   credentials->group_id = user_cred.gid;
+   return true;
++#elif BUILDFLAG(IS_HAIKU)
++  // Haiku: no getpeereid(); use SO_PEERCRED where the kernel has it.
++#if defined(SO_PEERCRED)
++  struct {
++    pid_t pid;
++    uid_t uid;
++    gid_t gid;
++  } user_cred;
++  socklen_t len = sizeof(user_cred);
++  if (getsockopt(socket, SOL_SOCKET, SO_PEERCRED, &user_cred, &len) < 0)
++    return false;
++  credentials->user_id = user_cred.uid;
++  credentials->group_id = user_cred.gid;
++  return true;
++#else
++  return false;
++#endif
+ #else
+   return getpeereid(
+       socket, &credentials->user_id, &credentials->group_id) == 0;
+diff --git a/third_party/webrtc/rtc_base/physical_socket_server.cc b/third_party/webrtc/rtc_base/physical_socket_server.cc
+index c562c33..0e56e9e 100644
+--- a/third_party/webrtc/rtc_base/physical_socket_server.cc
++++ b/third_party/webrtc/rtc_base/physical_socket_server.cc
+@@ -93,6 +93,23 @@ typedef char* SockOptArg;
+ #endif  // !defined(EPOLLRDHUP)
+ #endif  // defined(WEBRTC_LINUX)
+ 
++#if defined(__HAIKU__)
++// Haiku has no IPv6 traffic class or socket timestamps. Unknown option
++// numbers make those setsockopt()s fail cleanly; the cmsg checks never match.
++#ifndef IPV6_TCLASS
++#define IPV6_TCLASS (-1)
++#endif
++#ifndef IPV6_RECVTCLASS
++#define IPV6_RECVTCLASS (-2)
++#endif
++#ifndef SO_TIMESTAMP
++#define SO_TIMESTAMP (-3)
++#endif
++#ifndef SCM_TIMESTAMP
++#define SCM_TIMESTAMP SO_TIMESTAMP
++#endif
++#endif  // __HAIKU__
++
+ namespace webrtc {
+ 
+ namespace {

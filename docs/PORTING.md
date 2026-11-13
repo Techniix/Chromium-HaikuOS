@@ -11,7 +11,7 @@ Chromium release. The README covers building.
 - [What the Haiku patches do](#what-the-haiku-patches-do)
 - [Key decisions](#key-decisions)
 - [Hand-porting worklist](#hand-porting-worklist)
-- [Known risks for the first build](#known-risks-for-the-first-build)
+- [Known limitations](#known-limitations)
 - [Updating to a new Chromium release](#updating-to-a-new-chromium-release)
 - [Prior work](#prior-work)
 
@@ -155,6 +155,31 @@ runs with `--no-sandbox` (`scripts/run-chromium.sh`).
 - WebAssembly runs without the trap handler (it is Linux/BSD only), so V8
   uses explicit bounds checks. This is slower but correct.
 
+### `0006` to `0012` and `v8/0002`: fixes from the first full build
+
+These came out of bringing the first full `chrome` build up on Haiku
+(November 2026, Haiku hrev60368, Clang 23.1.4) and getting it to run. Each
+patch's header lists every change and why it is needed; in short:
+
+| Patch | Contents |
+| --- | --- |
+| `0006-build-haiku-toolchain-and-compat-headers` | Defines and flags in `build/config/haiku`, Clang's builtin headers ahead of GCC's, stub headers for Linux-only includes (`build/config/haiku/compat`), the `compat/lib` linker search directory and its sources, toolchain fixes |
+| `0007-base-haiku-fixes` | Small `base/` fixes (stat times, rlimits, fd directory, process title, ELF names) |
+| `0008-net-haiku-socket-and-errno-fixes` | errno cases, UDP option stubs, `ip_mreqn`, peer credentials |
+| `0009-third-party-haiku-fixes` | abseil, ANGLE, crashpad, Dawn (pregenerated Tint, see `docs/TINT.md`), fontconfig, perfetto, pthreadpool and others |
+| `0010-ui-wayland-haiku-window-frame-and-input` | Native Haiku window frame through the KDE server-decoration protocol, compatibility with Haiku's older libwayland, evdev key codes |
+| `0011-media-haiku-audio-and-decoder-fixes` | Media Kit audio output, the AV1 (`dav1d`) `EAGAIN` fix, capture without V4L2 |
+| `0012-content-chrome-services-haiku-fixes` | File watcher stub, sandbox declarations, Blink TLS model, small browser fixes |
+| `v8/0002-v8-haiku-tls-signals-and-memory-diagnostics` | TLS model and signal context; temporary diagnostics for the "Check failed: success" renderer crash |
+
+Two helpers cannot be built by GN and are built by `scripts/build.sh` into
+`build/config/haiku/compat/lib/libhaikucompat.a`: `__cxa_thread_atexit`
+(C++ `thread_local` destructors) and the C-ABI shim around the Media Kit's
+`BSoundPlayer`, which must be compiled against Haiku's libstdc++ rather than
+Chromium's libc++. `compat/lib/libm.a` is a linker script that adds that
+library, libgnu (`sched_getaffinity`, `pthread_getaffinity_np`), libmedia
+and libbe to every link.
+
 ## Key decisions
 
 - **Target 156.0.8078.79**, the current stable at the start, instead of 134.
@@ -171,9 +196,12 @@ runs with `--no-sandbox` (`scripts/run-chromium.sh`).
 - **Clang + libc++ (bundled) + system unwinder.** Chromium no longer builds
   with GCC. The LLVM libunwind build is avoided on Haiku.
 - **GLib on**, matching every tested desktop Linux and BSD configuration.
-- **No audio backend yet.** ALSA and PulseAudio are off. A Media Kit
-  `AudioManager` is the next media task; the old HaikuPorts QtWebEngine port
-  had one and can serve as a reference.
+- **Media Kit audio.** ALSA and PulseAudio are off; audio output goes
+  through a Media Kit `AudioManager` (patch 0011). Microphone input is a
+  silent fake for now.
+- **Native window frame.** Haiku's Wayland server draws real Haiku
+  decorations through the KDE server-decoration protocol (patch 0010), and
+  "Use system title bar and borders" is on by default.
 
 ## Hand-porting worklist
 
@@ -202,18 +230,22 @@ system libwayland).
 **Not built** (developer tools): `robo_lib/config.py`, `libc-util.py`,
 `asan_symbolize.py`, V8's test runner, `platform_thread_unittest.cc`.
 
-## Known risks for the first build
+## Known limitations
 
-| Area | Risk | Plan |
+Status on stock Haiku (hrev60368, November 2026): `chrome` builds, runs and
+browses with the flags in `scripts/run-chromium.sh`.
+
+| Area | Limitation | Notes |
 | --- | --- | --- |
-| Toolchain | LLVM libc++ and lld targeting Haiku at Chromium scale | Try `use_lld=false` if linking fails. |
-| libc gaps | Resolved for hrev60319, see [Target results](#target-results) | Re-run `tools/probe-haiku-libc.sh` on newer Haiku revisions. |
-| lld | `ld.lld` aborted once during the probe, on a link with an undefined symbol, instead of reporting an error | Successful links are unaffected. A link error in the Chromium build may show up as an lld crash dialog instead of a message; rerun that step with `-v` to see the symbol. |
-| Wayland | Chromium 156 requires system libwayland >= 1.26; hrev60319 ships 1.21.90 | Patch 0001 lowers the minimum to 1.21 on Haiku. Chromium's Wayland code calls nothing newer. If the link step reports a missing `wl_*` symbol from generated protocol code, that symbol is the next thing to backport. |
-| Build tools | esbuild (Go) and tsgo (Go) have no native Haiku builds | Use `esbuild-wasm` under node. Use `use_typescript_go=false`. |
-| NSS | Chromium on Linux needs system NSS/NSPR | Use HaikuPorts' NSS, or port it. |
-| ffmpeg | `third_party/ffmpeg` (tarball only, not inspected yet) picks a generated config directory by OS name | If GN asks for a `haiku` config directory, map Haiku to the `linux` configs, as FreeBSD does for itself. |
-| Shared memory | `base/memory/platform_shared_memory_region_posix.cc` uses `shm_open`/`memfd` paths | Confirm Haiku's `shm_open` works for cross-team sharing. |
+| HTTP/3 | QUIC fails: stock Haiku refuses `sendmsg()` with control messages on UDP sockets (`EOPNOTSUPP`) | `--disable-quic`; HTTP/2 over TCP is used. |
+| V8 | A renderer occasionally dies with `Check failed: success.` | Not explained yet; `v8/0002` labels every candidate check so the next report names its source. |
+| Sandbox | None; every process runs with `--no-sandbox` | No kernel sandbox on Haiku. |
+| GPU | Software rendering only (`--disable-gpu`) | Haiku's Wayland layer has no EGL/dma-buf path. |
+| File watching | Web apps are not told about file changes | No inotify or kqueue on stock Haiku; the stub watcher reports failure. |
+| Media | No microphone input or cameras; no hardware video decoding | Fakes report no devices. |
+| Desktop | No D-Bus services: no system notifications, no secret store (`--password-store=basic`) | |
+| Crash traces | Release builds print no symbolized stack traces | No `backtrace()` in stock Haiku's libroot. |
+| Build | `pkgman` updates of `haiku_devel` during a build make ninja rebuild almost everything | `tools/skip-sysheader-rebuild.sh` undoes that. |
 
 ## Target results
 
@@ -227,7 +259,7 @@ system libwayland).
 | yes, in libnetwork | accept4 | `network` is in Haiku's `default_libs`. |
 | no | getdents | Haiku uses `DirReaderFallback` (patch 0002). |
 | no | memfd_create | Not needed. Shared memory uses files in the temp directory, as on BSD. The only converted `memfd_create` user is test code. |
-| no | sched_getaffinity | Only used under `IS_LINUX`. |
+| in libgnu | sched_getaffinity, pthread_getaffinity_np | Used by bundled dav1d and FFmpeg; libgnu is linked through `compat/lib/libm.a`. |
 | no | getpeereid | Not used by anything Haiku builds. |
 | no | backtrace | Already excluded (glibc/Apple only). Crash logs have no stack traces for now. |
 | no | POLLRDHUP | `haiku_epoll_types.h` defines it as 0. |

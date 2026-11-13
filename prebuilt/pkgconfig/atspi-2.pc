@@ -1,0 +1,5 @@
+Name: atspi-2
+Description: Stub for Chromium GN on Haiku (no AT-SPI)
+Version: 2.50.0
+Cflags:
+Libs:
