@@ -62,8 +62,8 @@ in this file and are never reported as hardware results.
 | --- | --- |
 | 1. MessagePumpEpoll with eventfd wake-ups | Done in the patches; not yet run on Renga |
 | 2. inotify FilePathWatcher (base and File System Access) | Done in the patches; not yet run on Renga |
-| 3. memfd shared memory | Done for unsafe regions; writable regions fall back to files until R-1 |
-| 4. Symbolized crash traces through backtrace() | Done in the patches, `tools/symbolize-trace.py` added; offset base open (R-3) |
+| 3. memfd shared memory | Done for unsafe regions; writable regions fall back to files until R-1 lands (accepted 2026-11-14) |
+| 4. Symbolized crash traces through backtrace() | Done in the patches, `tools/symbolize-trace.py` added; glibc-style offsets accepted by Renga (R-3, 2026-11-14), not landed yet |
 | 5. Removing emulation | Done; list below |
 | 6. HTTP/3 without --disable-quic | Flag removed; result pending a Renga run |
 | 7. V8 "Check failed: success" backtrace | Tooling ready; backtrace pending a Renga run |

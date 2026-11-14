@@ -16,12 +16,27 @@ R-1, R-2, R-4 and R-6 on the running system.
 Urgency: **high** blocks a phase B item; **medium** costs performance or
 noise in normal use; **low** is correctness at the edges or a later phase.
 
-Last updated: 2026-11-13. Port commit: see `git log -- RENGA-REQUESTS.md`.
+Last updated: 2026-11-14. Port commit: see `git log -- RENGA-REQUESTS.md`.
 
-## Open
+## Accepted, waiting to land
+
+Renga accepted R-1 to R-6 on 2026-11-14 (`CHROMIUM.md`, "answers to R-1 to
+R-6 and to the phase C notes") and scheduled them as one batch after the
+`…-renguin-wayland` image. Each entry below keeps the original request and
+says what Renga will do and what the port changes when it lands. They move
+to "Answered" when Renga's "landed" entry appears and the port has been
+tested against it.
 
 ### R-3: backtrace_symbols(): which "+0x" offset, and frames outside the first region
 
+- **Status:** accepted 2026-11-14. Renga confirmed that frames in the
+  executable segment of an lld-linked image can print as a bare `[0x...]`
+  today. It will find the image for an address in any of its mapped
+  segments (through `dladdr()`) and print `image(+0xOFF)` with `OFF` counted
+  from the image's load address, as glibc, and document it in `PORTING.md`.
+  **Port, when it lands:** make `--base image` the default of
+  `tools/symbolize-trace.py`; capture the V8 crash (phase B item 7) again,
+  since traces from earlier images may be missing frames.
 - **Urgency:** high (phase B item 7, the V8 crash backtrace).
 - **Need:** for a frame in a non-exported function, an offset that
   `addr2line`/`llvm-symbolizer` resolve without knowing Renga's
@@ -55,6 +70,12 @@ Last updated: 2026-11-13. Port commit: see `git log -- RENGA-REQUESTS.md`.
 
 ### R-1: a read-only open file description for a memfd
 
+- **Status:** accepted 2026-11-14, as a small native `/proc` for Renga
+  programs: `open("/proc/self/fd/N", O_RDONLY)` creates a new open file
+  description with Linux semantics; `/dev/fd/N` behaves the same.
+  **Port, when it lands:** nothing to change; writable regions become
+  memfd-backed because the code already tries `/proc/self/fd/N`. Confirm with
+  the "R-1" line of `scripts/renga-tests.sh probe`.
 - **Urgency:** medium.
 - **Need:** a way to get a second, `O_RDONLY` open file description for
   the file behind a memfd descriptor.
@@ -84,6 +105,11 @@ Last updated: 2026-11-13. Port commit: see `git log -- RENGA-REQUESTS.md`.
 
 ### R-2: /proc/self/maps
 
+- **Status:** accepted 2026-11-14 (`/proc/self/maps` in Linux's format,
+  part of the same `/proc`).
+  **Port, when it lands:** consider building Chromium's in-process
+  symbolizer (`USE_SYMBOLIZE`) again on Renga, for file:line in traces
+  without the offline tool; it also needs R-3's behaviour to agree with it.
 - **Urgency:** low now, medium for phase G.
 - **Need:** `/proc/self/maps` in Linux's format (start-end, perms, offset,
   dev, inode, path), or for the sandbox only, an equivalent the port can
@@ -99,6 +125,10 @@ Last updated: 2026-11-13. Port commit: see `git log -- RENGA-REQUESTS.md`.
 
 ### R-4: SO_TIMESTAMP on UDP sockets
 
+- **Status:** accepted 2026-11-14 (`SO_TIMESTAMP` with `SCM_TIMESTAMP` on
+  `recvmsg()`/`recvmmsg()`).
+  **Port, when it lands:** remove the `SO_TIMESTAMP` fallback from patch 0008
+  (net and WebRTC).
 - **Urgency:** low.
 - **Need:** `setsockopt(SOL_SOCKET, SO_TIMESTAMP)` and an `SCM_TIMESTAMP`
   control message (`struct timeval`, receive time) on `recvmsg()`/
@@ -112,6 +142,10 @@ Last updated: 2026-11-13. Port commit: see `git log -- RENGA-REQUESTS.md`.
 
 ### R-5: struct ip_mreqn for IP_ADD_MEMBERSHIP / IP_DROP_MEMBERSHIP
 
+- **Status:** accepted 2026-11-14 (`struct ip_mreqn` in `<netinet/in.h>`,
+  honoured by `IP_ADD_MEMBERSHIP`, `IP_DROP_MEMBERSHIP` and
+  `IP_MULTICAST_IF`, `imr_ifindex` first).
+  **Port, when it lands:** remove the `ip_mreqn` declaration from patch 0008.
 - **Urgency:** low.
 - **Need:** `struct ip_mreqn` in `<netinet/in.h>` (`imr_multiaddr`,
   `imr_address`, `imr_ifindex`), accepted by `IP_ADD_MEMBERSHIP`,
@@ -127,6 +161,9 @@ Last updated: 2026-11-13. Port commit: see `git log -- RENGA-REQUESTS.md`.
 
 ### R-6: the inotify watch limit
 
+- **Status:** accepted 2026-11-14 (`/proc/sys/fs/inotify/max_user_watches`,
+  8192, per instance).
+  **Port, when it lands:** nothing to change; the error line goes away.
 - **Urgency:** low (one error line per process).
 - **Need:** `/proc/sys/fs/inotify/max_user_watches`, or a documented
   limit the port may hard-code.
@@ -143,6 +180,18 @@ These are not requests yet; they are what the port's code and the stock
 Haiku bring-up showed, for Renga to take into account when planning.
 
 ### Phase C (Wayland layer)
+
+Status (2026-11-14): Renga runs a socket Wayland compositor
+(`$XDG_RUNTIME_DIR/wayland-0`) with xdg-shell, `wl_shm` from memfd,
+subsurfaces, viewporter, xdg-activation, text-input-v3, KDE
+server-decoration, one output and the clipboard (QEMU tested). Renga
+accepted the remaining items below for the same batch as R-1 to R-6, except
+`linux-dmabuf` and `linux-drm-syncobj`, which come with the GPU stage. Renga
+will also package its socket libwayland (client, server, headers, `.pc`
+files) for ports; until that entry names the package, the port keeps
+HaikuPorts' in-process libwayland. When both land, the port moves to the
+packaged libwayland and drops the KDE decoration path and the
+version-compatibility blocks in patch 0010.
 
 - **Decorations:** the port gets the native Haiku frame through the KDE
   `org_kde_kwin_server_decoration` protocol, because the HaikuPorts server
@@ -218,6 +267,13 @@ Haiku bring-up showed, for Renga to take into account when planning.
   PartitionAlloc's `SpinningMutex` (`FUTEX_WAIT`/`FUTEX_WAKE` with
   `FUTEX_PRIVATE_FLAG`). The port keeps
   the generic fallbacks until it ships.
+- **H (gamepads):** Renga exposes pads as evdev devices
+  (`/dev/input/event<N>`) and game controllers as `/dev/hidraw<N>`, without
+  udev (`CHROMIUM.md`, 2026-11-13). Chromium's Linux gamepad and HID code
+  enumerates and watches devices through udev (`device/udev_linux`), so phase
+  H needs either a udev-compatible enumeration interface from Renga or a
+  small port-side enumerator over `/dev/input` with inotify. To be decided
+  with Renga before phase H starts.
 - **H:** WebUSB on Linux uses usbfs (`/dev/bus/usb/BBB/DDD`,
   `USBDEVFS_*` ioctls) with udev for enumeration; WebHID uses `hidraw`;
   Web Serial uses `/dev/tty*` with termios and udev; the Gamepad API uses
@@ -227,4 +283,4 @@ Haiku bring-up showed, for Renga to take into account when planning.
 
 ## Answered
 
-None yet.
+None closed yet; R-1 to R-6 are accepted and waiting to land (above).
