@@ -101,6 +101,30 @@ chromium            # or Deskbar > Applications > Chromium
 - `packages/` is not tracked by git. Keep the packages on a disk that
   survives reinstalling Renga.
 
+## Test results
+
+### 2026-11-14: probe, real hardware
+
+`scripts/renga-tests.sh probe` at port commit `0498b85`, on Renga
+`ea9753b2` (hrev60381+289), real hardware (AMD Ryzen 5 7600X). All 21
+checks passed: epoll with an eventfd wake-up, inotify, memfd with sealing,
+`backtrace_symbols_fd()`, the QUIC socket options with an ECN-marked
+`sendmsg()` and `recvmmsg()` (ECN codepoint and `IP_PKTINFO` received),
+affinity and `getpeereid()`.
+
+- R-3: frames in a static function print as `image(+0xOFF)`, and with
+  `--base image` (the default) `tools/symbolize-trace.py` resolved every
+  frame of the probe to its function and line. `--base text` gives wrong
+  functions on this image, as expected.
+- R-1 (`/proc/self/fd/N` read-only reopen of a memfd) and R-4
+  (`SO_TIMESTAMP`): available.
+- R-2 and R-6 were reported missing, but because the probe used
+  `access()`, which Renga's `/proc` does not support (it supports `open()`
+  only, and Chromium only opens these files). The probe now opens and
+  reads them; to be re-run.
+
+Chromium itself has not been built on Renga yet.
+
 ## Status
 
 | Item (F-43 phase B) | State |

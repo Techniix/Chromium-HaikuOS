@@ -258,6 +258,18 @@ static void check_udp(void) {
 #define INFO(name, cond) \
   printf("INFO %s: %s\n", name, (cond) ? "available" : "missing")
 
+/* Renga's /proc supports open() only (no stat(), access() or listing), and
+ * Chromium only ever open()s and read()s these files, so probe them the same
+ * way: true if the file opens and has content. */
+static int proc_readable(const char* path) {
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return 0;
+  char c;
+  ssize_t n = read(fd, &c, 1);
+  close(fd);
+  return n == 1;
+}
+
 /* Things Chromium probes and the port does not work around. */
 static void check_misc(void) {
   cpu_set_t set;
@@ -279,9 +291,9 @@ static void check_misc(void) {
 #endif
   );
   close(t);
-  INFO("R-2 /proc/self/maps", access("/proc/self/maps", R_OK) == 0);
+  INFO("R-2 /proc/self/maps", proc_readable("/proc/self/maps"));
   INFO("R-6 /proc/sys/fs/inotify/max_user_watches",
-       access("/proc/sys/fs/inotify/max_user_watches", R_OK) == 0);
+       proc_readable("/proc/sys/fs/inotify/max_user_watches"));
 }
 
 int main(void) {
