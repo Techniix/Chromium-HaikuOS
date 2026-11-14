@@ -107,7 +107,14 @@ elif [ -n "${TSC:-}" ]; then
 # Written by scripts/prepare-tree.sh: tsgo stand-in for Haiku.
 "$TSC" "\$@" --noEmitOnError false
 rc=\$?
-[ \$rc -eq 0 ] || echo "tsc wrapper: ignoring tsc exit \$rc (TypeScript version skew)" >&2
+# 1 and 2 mean type errors (output still emitted with --noEmitOnError false);
+# anything else means tsc itself did not run, and the build must stop here
+# rather than fail later on missing JavaScript files.
+case \$rc in
+  0) ;;
+  1|2) echo "tsc wrapper: ignoring type errors (exit \$rc, TypeScript version skew)" >&2 ;;
+  *) echo "tsc wrapper: $TSC failed with exit \$rc" >&2; exit \$rc ;;
+esac
 exit 0
 EOF_TSC
   chmod +x "$w"

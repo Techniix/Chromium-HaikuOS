@@ -95,7 +95,7 @@ home directory:
 
 ```sh
 npm config set prefix ~/config/non-packaged   # bin/ is already on PATH
-npm install -g esbuild-wasm typescript
+npm install -g esbuild-wasm typescript@6
 python3 -m pip install --user clang   # newest bindings work with newer libclang
 ```
 

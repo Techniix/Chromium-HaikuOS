@@ -60,8 +60,18 @@ _need PATCH        patch        "pkgman install cmd:patch" patch
 _need ESBUILD      esbuild      "pkgman install npm; npm config set prefix ~/config/non-packaged; npm install -g esbuild-wasm" esbuild
 _want TSGO         tsgo         "" tsgo
 # Without tsgo, the JavaScript compiler is used through a wrapper:
-#   npm install -g typescript
+#   npm install -g typescript@6
+# TypeScript 7 and later are native Go programs (the tsgo compiler) with no
+# Haiku build; their npm package installs a `tsc` that cannot run here.
 _want TSC          tsc          "" tsc
+if [ -z "${TSGO:-}" ] && [ -n "${TSC:-}" ]; then
+  _tsc_version=$("$TSC" --version 2>/dev/null | sed -n 's/^Version \([0-9]*\)\..*/\1/p')
+  case $_tsc_version in
+    4|5|6) ;;
+    '') _missing+=("a working tsc: '$TSC --version' fails (npm install -g typescript@6)") ;;
+    *)  _missing+=("tsc $_tsc_version is the native Go compiler, which does not run on Haiku (npm install -g typescript@6)") ;;
+  esac
+fi
 _want SYS_CXX      "system C++" "" g++ c++
 _want CLANG_FORMAT clang-format "" clang-format
 
