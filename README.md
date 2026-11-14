@@ -70,7 +70,7 @@ first successful build used these packages:
 ```sh
 pkgman install llvm23 llvm23_clang llvm23_lld llvm23_libs rust_bin bindgen \
     python3.14 setuptools_python3.14 ninja nasm pkgconfig gperf bison flex \
-    git nodejs24 npm gcc haiku_devel wayland wayland_devel wayland_protocols \
+    git patch nodejs24 npm gcc haiku_devel wayland wayland_devel wayland_protocols \
     wayland_server libxkbcommon_devel glib2_devel nss_devel nspr_devel \
     dbus_devel expat_devel cairo_devel pango_devel harfbuzz_devel \
     fontconfig_devel freetype_devel

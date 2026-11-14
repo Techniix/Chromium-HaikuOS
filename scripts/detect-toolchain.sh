@@ -52,6 +52,7 @@ _need PKG_CONFIG   pkg-config   "HaikuPorts pkgconfig"     pkg-config pkgconf
 _need BISON        bison        "HaikuPorts bison"         bison
 _need FLEX         flex         "HaikuPorts flex"          flex
 _need GIT          git          "HaikuPorts git"           git
+_need PATCH        patch        "pkgman install cmd:patch" patch
 # esbuild is a Go program; on Haiku the WebAssembly build runs under node.
 # /boot/system is read-only, so npm's global prefix must point at the
 # writable non-packaged hierarchy (already on PATH):
