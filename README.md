@@ -120,6 +120,7 @@ compile step when reporting a build problem.
 | `docs/RENGA.md`, `RENGA-REQUESTS.md` | Renga target: change log, tests, requests to Renga |
 | `scripts/renga-tests.sh`, `tools/renga-probe.c` | Renga interface probe, HTTP/3 test, crash capture |
 | `tools/symbolize-trace.py` | Resolves `image(+0xoffset)` stack frames with llvm-symbolizer |
+| `scripts/package-hpkg.sh` | Packages a finished build as an `.hpkg` (Renga), see `docs/RENGA.md` |
 
 ## License
 

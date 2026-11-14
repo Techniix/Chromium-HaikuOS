@@ -65,6 +65,42 @@ in this file and are never reported as hardware results.
 - `v8` starts Chromium with stderr captured, waits for you to reproduce the
   tab crash ("Check failed: success"), and symbolizes the log.
 
+## Packaging a build
+
+`scripts/package-hpkg.sh OUT_DIR` turns a finished build into a Haiku
+package, `packages/chromium_renga-156.0.8078.79-<revision>-x86_64.hpkg`, so
+a build that works can be reinstalled on a later Renga image without
+rebuilding:
+
+```sh
+scripts/package-hpkg.sh work/chromium-156.0.8078.79/out/Release
+pkgman install packages/chromium_renga-156.0.8078.79-1-x86_64.hpkg
+chromium            # or Deskbar > Applications > Chromium
+```
+
+- It installs to `/boot/system/apps/Chromium`, with a `chromium` command
+  and a Deskbar entry. The launcher uses the same flags as
+  `scripts/run-chromium.sh`, with the profile in
+  `~/config/settings/Chromium` (set `CHROMIUM_PROFILE` to use another);
+  the profile is not in the package, so back it up separately if it
+  matters.
+- `apps/Chromium/BUILD-INFO.txt` records the port commit, whether the
+  working tree had uncommitted patch or script changes, the Renga revision
+  it was built on and the `args.gn`.
+- The revision goes up by one with each package of the same Chromium
+  version in `packages/` (or set `REVISION`), so `pkgman` treats a newer
+  build as an update.
+- Binaries are stripped (`STRIP=all`, or `debug`/`none`); the unstripped
+  copies go to `packages/<package>-symbols/`. Keep that directory with the
+  package: crash traces from the installed build are resolved with
+  `tools/symbolize-trace.py --dir packages/<package>-symbols`.
+- Requirements are worked out from the libraries the binaries link, by
+  asking packagefs which installed package each one comes from, so they
+  match the image the build was made on. On a much newer image, `pkgman`
+  says if one of them is gone; add packages by hand with `REQUIRES_EXTRA`.
+- `packages/` is not tracked by git. Keep the packages on a disk that
+  survives reinstalling Renga.
+
 ## Status
 
 | Item (F-43 phase B) | State |
