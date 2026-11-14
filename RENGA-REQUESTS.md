@@ -16,20 +16,23 @@ R-1, R-2, R-4 and R-6 on the running system.
 Urgency: **high** blocks a phase B item; **medium** costs performance or
 noise in normal use; **low** is correctness at the edges or a later phase.
 
-Last updated: 2026-11-14. Port commit: see `git log -- RENGA-REQUESTS.md`.
+Last updated: 2026-11-14 (landed batch). Port commit: see `git log -- RENGA-REQUESTS.md`.
 
-## Accepted, waiting to land
+## Landed in Renga, not yet tested in the port
 
-Renga accepted R-1 to R-6 on 2026-11-14 (`CHROMIUM.md`, "answers to R-1 to
-R-6 and to the phase C notes") and scheduled them as one batch after the
-`…-renguin-wayland` image. Each entry below keeps the original request and
-says what Renga will do and what the port changes when it lands. They move
-to "Answered" when Renga's "landed" entry appears and the port has been
-tested against it.
+Renga accepted R-1 to R-6 on 2026-11-14 and landed them the same day in
+image `2026.11.14-chromium-wayland` (`CHROMIUM.md`, "landed: R-1 to R-5 and
+the compositor completion"; QEMU tested on Renga's side). The port changes
+listed under each entry are on the `renga` branch since 2026-11-14 (see
+`docs/RENGA.md`). Entries move to "Answered" once the port has been built
+and run on that image.
 
 ### R-3: backtrace_symbols(): which "+0x" offset, and frames outside the first region
 
-- **Status:** accepted 2026-11-14. Renga confirmed that frames in the
+- **Status:** landed 2026-11-14 (`c595cafe`): frames are found in any
+  segment and printed as `image(+0xOFF)`, `OFF` = address - load bias (the
+  ELF virtual address). Port: `--base image` is the default now.
+  Accepted earlier the same day: Renga confirmed that frames in the
   executable segment of an lld-linked image can print as a bare `[0x...]`
   today. It will find the image for an address in any of its mapped
   segments (through `dladdr()`) and print `image(+0xOFF)` with `OFF` counted
@@ -70,7 +73,9 @@ tested against it.
 
 ### R-1: a read-only open file description for a memfd
 
-- **Status:** accepted 2026-11-14, as a small native `/proc` for Renga
+- **Status:** landed 2026-11-14 (`da0ac1d9`; `open()` only, no `stat()`,
+  `readlink()` or listing; a socket descriptor gives `ENXIO`). Accepted as
+  a small native `/proc` for Renga
   programs: `open("/proc/self/fd/N", O_RDONLY)` creates a new open file
   description with Linux semantics; `/dev/fd/N` behaves the same.
   **Port, when it lands:** nothing to change; writable regions become
@@ -105,7 +110,8 @@ tested against it.
 
 ### R-2: /proc/self/maps
 
-- **Status:** accepted 2026-11-14 (`/proc/self/maps` in Linux's format,
+- **Status:** landed 2026-11-14 (`da0ac1d9`; `start - offset` = load
+  base). Accepted as (`/proc/self/maps` in Linux's format,
   part of the same `/proc`).
   **Port, when it lands:** consider building Chromium's in-process
   symbolizer (`USE_SYMBOLIZE`) again on Renga, for file:line in traces
@@ -125,7 +131,8 @@ tested against it.
 
 ### R-4: SO_TIMESTAMP on UDP sockets
 
-- **Status:** accepted 2026-11-14 (`SO_TIMESTAMP` with `SCM_TIMESTAMP` on
+- **Status:** landed 2026-11-14 (`976dcccc`); port fallback removed.
+  Accepted as (`SO_TIMESTAMP` with `SCM_TIMESTAMP` on
   `recvmsg()`/`recvmmsg()`).
   **Port, when it lands:** remove the `SO_TIMESTAMP` fallback from patch 0008
   (net and WebRTC).
@@ -142,7 +149,8 @@ tested against it.
 
 ### R-5: struct ip_mreqn for IP_ADD_MEMBERSHIP / IP_DROP_MEMBERSHIP
 
-- **Status:** accepted 2026-11-14 (`struct ip_mreqn` in `<netinet/in.h>`,
+- **Status:** landed 2026-11-14 (`976dcccc`); port declaration removed.
+  Accepted as (`struct ip_mreqn` in `<netinet/in.h>`,
   honoured by `IP_ADD_MEMBERSHIP`, `IP_DROP_MEMBERSHIP` and
   `IP_MULTICAST_IF`, `imr_ifindex` first).
   **Port, when it lands:** remove the `ip_mreqn` declaration from patch 0008.
@@ -161,7 +169,8 @@ tested against it.
 
 ### R-6: the inotify watch limit
 
-- **Status:** accepted 2026-11-14 (`/proc/sys/fs/inotify/max_user_watches`,
+- **Status:** landed 2026-11-14 (`da0ac1d9`). Accepted as
+  (`/proc/sys/fs/inotify/max_user_watches`,
   8192, per instance).
   **Port, when it lands:** nothing to change; the error line goes away.
 - **Urgency:** low (one error line per process).
@@ -181,7 +190,16 @@ Haiku bring-up showed, for Renga to take into account when planning.
 
 ### Phase C (Wayland layer)
 
-Status (2026-11-14): Renga runs a socket Wayland compositor
+Status (2026-11-14, evening): landed. Renga's compositor now has
+everything below except `linux-dmabuf`, `linux-drm-syncobj` and
+`libwayland-egl` (GPU stage), and `renga_wayland` is packaged. The port
+builds against it and has dropped the KDE decoration path and the
+version-compatibility blocks of patch 0010 (`docs/RENGA.md`). One item is
+now on the port's side: Chromium 156 ignores `configure_bounds`
+(`XdgToplevel::OnConfigureBounds` is `NOTIMPLEMENTED`), so using it for the
+first window's size needs a port change.
+
+Earlier the same day: Renga runs a socket Wayland compositor
 (`$XDG_RUNTIME_DIR/wayland-0`) with xdg-shell, `wl_shm` from memfd,
 subsurfaces, viewporter, xdg-activation, text-input-v3, KDE
 server-decoration, one output and the clipboard (QEMU tested). Renga

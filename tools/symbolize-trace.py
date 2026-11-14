@@ -20,11 +20,13 @@ Usage:
 
   --dir        where to look for images whose path in the log does not exist
                on this machine (for example out/Release); may be repeated
-  --base       how "+0x" offsets are counted: "text" (from the start of the
-               image's first executable PT_LOAD segment) or "image" (from the
-               load address, as glibc does). Default "text", matching Renga's
-               execinfo.cpp, which counts from image_info.text. See
-               RENGA-REQUESTS.md R-3.
+  --base       how "+0x" offsets are counted: "image" (from the load
+               address, i.e. the ELF virtual address, as glibc does) or
+               "text" (from the start of the first executable PT_LOAD
+               segment). Default "image": Renga prints glibc-style offsets
+               since image 2026.11.14-chromium-wayland (c595cafe,
+               RENGA-REQUESTS.md R-3). Use "text" for traces from older
+               images.
 
 Lines that are not frames are printed unchanged, so the whole log can be
 piped through it.
@@ -106,7 +108,7 @@ def main():
     ap.add_argument("log", nargs="?", help="log file (default: stdin)")
     ap.add_argument("--dir", action="append", default=[])
     ap.add_argument("--symbolizer")
-    ap.add_argument("--base", choices=("text", "image"), default="text")
+    ap.add_argument("--base", choices=("text", "image"), default="image")
     args = ap.parse_args()
 
     symbolizer = find_tool("llvm-symbolizer", args.symbolizer)

@@ -2,6 +2,14 @@ From: Chromium-HaikuOS contributors
 Subject: [PATCH] build: add the Haiku platform (build flags, toolchain, Ozone/Wayland defaults)
 
 Applies after the FreeBSD 156.0.8078.79 patches and tools/haikuify.py.
+
+Renga branch: third_party/wayland uses Renga's socket-transport
+libwayland (package renga_wayland, found through pkg-config as
+wayland-client/wayland-server) and builds libwayland-cursor and
+libwayland-egl from Chromium's bundled sources against it, because the
+package has neither and HaikuPorts' copies link HaikuPorts' libwayland,
+which must not share a process with Renga's. include/config.h enables
+the memfd_create() path of the cursor library's shared-memory helper.
 ---
 diff --git a/base/allocator/partition_allocator/src/partition_alloc/build_config.h b/base/allocator/partition_allocator/src/partition_alloc/build_config.h
 index a124902743..008b0e974c 100644
@@ -291,18 +299,22 @@ index 0000000000..ae580ab010
 +  }
 +}
 diff --git a/third_party/wayland/BUILD.gn b/third_party/wayland/BUILD.gn
-index 30c0dfba13..2b41c68bfb 100644
+index 30c0dfba13..c48fde75f6 100644
 --- a/third_party/wayland/BUILD.gn
 +++ b/third_party/wayland/BUILD.gn
-@@ -245,9 +245,17 @@ if (!use_system_libwayland) {
+@@ -245,9 +245,21 @@ if (!use_system_libwayland) {
    # use_system_libwayland
    import("wayland_version.gni")
  
 +  _wayland_min_version = wayland_version
 +  if (is_haiku) {
-+    # Haiku ships libwayland 1.21.x (with its in-process server add-on).
-+    # Chromium's own Wayland code needs nothing newer than 1.21; generated
-+    # protocol code is checked at link time.
++    # Renga's socket-transport libwayland (package renga_wayland) is 1.21.90,
++    # with the core protocol headers generated from Wayland 1.24's XML (so
++    # wl_fixes, wl_pointer 9 and wl_keyboard 10 are declared). Chromium's
++    # own Wayland code needs nothing newer than 1.21 from the library.
++    # scripts/build.sh puts /boot/system/data/renga_wayland/pkgconfig first
++    # in PKG_CONFIG_PATH, so "wayland-client" and "wayland-server" resolve to
++    # libwayland-client-renga and libwayland-server-renga.
 +    _wayland_min_version = "1.21.0"
 +  }
 +
@@ -313,36 +325,149 @@ index 30c0dfba13..2b41c68bfb 100644
    }
  
    group("wayland_server") {
-@@ -260,12 +268,12 @@ if (!use_system_libwayland) {
+@@ -260,29 +272,93 @@ if (!use_system_libwayland) {
  
    pkg_config("wayland_client_config") {
      packages = [ "wayland-client" ]
 -    extra_args = [ "wayland-client >= $wayland_version" ]
+-  }
+-
+-  pkg_config("wayland_cursor_config") {
+-    packages = [ "wayland-cursor" ]
+-    extra_args = [ "wayland-cursor >= $wayland_version" ]
+-  }
+-
+-  pkg_config("wayland_egl_config") {
+-    packages = [ "wayland-egl" ]
+-    extra_args = [ "wayland-egl >= $wayland_egl_version" ]
 +    extra_args = [ "wayland-client >= $_wayland_min_version" ]
    }
  
-   pkg_config("wayland_cursor_config") {
-     packages = [ "wayland-cursor" ]
--    extra_args = [ "wayland-cursor >= $wayland_version" ]
-+    extra_args = [ "wayland-cursor >= $_wayland_min_version" ]
+   group("wayland_client") {
+     public_configs = [ ":wayland_client_config" ]
    }
  
-   pkg_config("wayland_egl_config") {
+-  group("wayland_cursor") {
+-    public_configs = [ ":wayland_cursor_config" ]
+-  }
+-
+-  group("wayland_egl") {
+-    public_configs = [ ":wayland_egl_config" ]
++  if (is_haiku) {
++    # renga_wayland has no libwayland-cursor or libwayland-egl, and
++    # HaikuPorts' copies link HaikuPorts' libwayland-client, which must not
++    # be loaded next to Renga's (same symbols). Build both from Chromium's
++    # bundled sources against the system client library instead, as the
++    # non-system build does. They use only the public client API.
++    config("wayland_helpers_public_config") {
++      include_dirs = [
++        "src/cursor",
++        "src/egl",
++      ]
++    }
++
++    config("wayland_helpers_private_config") {
++      # include/config.h (HAVE_MEMFD_CREATE etc.); not include/src, whose
++      # wayland-version.h would shadow the system library's.
++      include_dirs = [ "include" ]
++      cflags = [ "-Wno-macro-redefined" ]
++
++      # Keep WL_EXPORT symbols out of the dynamic symbol table, as the
++      # bundled build's wayland_build_workaround_hide_symbols does.
++      defines = [ "visibility(x)=visibility(\"hidden\")" ]
++    }
++
++    source_set("wayland_cursor") {
++      sources = [
++        "src/cursor/cursor-data.h",
++        "src/cursor/os-compatibility.c",
++        "src/cursor/os-compatibility.h",
++        "src/cursor/wayland-cursor.c",
++        "src/cursor/wayland-cursor.h",
++        "src/cursor/xcursor.c",
++        "src/cursor/xcursor.h",
++      ]
++      configs -= [ "//build/config/compiler:chromium_code" ]
++      configs += [
++        ":wayland_helpers_private_config",
++        "//build/config/compiler:no_chromium_code",
++      ]
++      public_configs = [
++        ":wayland_client_config",
++        ":wayland_helpers_public_config",
++      ]
++    }
++
++    source_set("wayland_egl") {
++      sources = [
++        "src/egl/wayland-egl-backend.h",
++        "src/egl/wayland-egl-core.h",
++        "src/egl/wayland-egl.c",
++        "src/egl/wayland-egl.h",
++      ]
++      configs -= [ "//build/config/compiler:chromium_code" ]
++      configs += [
++        ":wayland_helpers_private_config",
++        "//build/config/compiler:no_chromium_code",
++      ]
++      public_configs = [
++        ":wayland_client_config",
++        ":wayland_helpers_public_config",
++      ]
++    }
++  } else {
++    pkg_config("wayland_cursor_config") {
++      packages = [ "wayland-cursor" ]
++      extra_args = [ "wayland-cursor >= $_wayland_min_version" ]
++    }
++
++    pkg_config("wayland_egl_config") {
++      packages = [ "wayland-egl" ]
++      extra_args = [ "wayland-egl >= $wayland_egl_version" ]
++    }
++
++    group("wayland_cursor") {
++      public_configs = [ ":wayland_cursor_config" ]
++    }
++
++    group("wayland_egl") {
++      public_configs = [ ":wayland_egl_config" ]
++    }
+   }
+ }
+ 
 diff --git a/third_party/wayland/features.gni b/third_party/wayland/features.gni
-index 6a20f869e7..772853eeb5 100644
+index 6a20f869e7..89d0599a6a 100644
 --- a/third_party/wayland/features.gni
 +++ b/third_party/wayland/features.gni
-@@ -5,5 +5,9 @@
+@@ -5,5 +5,10 @@
  declare_args() {
    # Controls whether the build should use the version of Wayland
    # library shipped with the system or Chromium third_party.
 -  use_system_libwayland = false
 +  #
-+  # Haiku must use the system library: Haiku's libwayland-client is patched to
-+  # load the in-process wayland_server add-on instead of connecting to a
-+  # compositor socket, and Haiku has no epoll for the bundled event loop.
++  # Haiku uses the system library. On Renga that is the socket-transport
++  # libwayland of the renga_wayland package, which talks to Renga's
++  # compositor ($XDG_RUNTIME_DIR/wayland-0); on stock Haiku (main branch) it
++  # is HaikuPorts' in-process build.
 +  use_system_libwayland = is_haiku
  }
+diff --git a/third_party/wayland/include/config.h b/third_party/wayland/include/config.h
+index 4e367869c6..95b336b154 100644
+--- a/third_party/wayland/include/config.h
++++ b/third_party/wayland/include/config.h
+@@ -18,6 +18,11 @@
+ #endif
+ #endif
+ 
++#if defined(__HAIKU__)
++// Renga: memfd_create() with sealing, in libgnu.
++#define HAVE_MEMFD_CREATE
++#endif
++
+ #define HAVE_MKOSTEMP
+ 
+ #define HAVE_MREMAP
 diff --git a/ui/webui/webui_features.gni b/ui/webui/webui_features.gni
 index cbf49610a3..78c5b1a309 100644
 --- a/ui/webui/webui_features.gni

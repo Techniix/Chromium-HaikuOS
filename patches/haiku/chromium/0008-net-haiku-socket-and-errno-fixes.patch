@@ -4,11 +4,10 @@ Subject: [PATCH] net: Haiku socket options, errno values and peer credentials
 - base/net_errors_posix.cc: several POSIX error names used in
   MapSystemError() are not defined by Haiku; every case is guarded with
   #ifdef.
-- socket/udp_socket_posix.cc: Renga has no SO_TIMESTAMP
-  (RENGA-REQUESTS.md R-4); define it as an option number that makes
-  setsockopt() fail cleanly and never matches a received control message,
-  so Chromium takes the receive time itself. Haiku has only struct
-  ip_mreq; provide Linux's ip_mreqn layout (RENGA-REQUESTS.md R-5).
+- socket/udp_socket_posix.cc: IP_DEFAULT_MULTICAST_TTL (1, as on Linux
+  and the BSDs) is not in Renga's headers. SO_TIMESTAMP and struct
+  ip_mreqn come from Renga (RENGA-REQUESTS.md R-4 and R-5, landed in image
+  2026.11.14-chromium-wayland), so the stock-Haiku stand-ins are gone, and
   recvmmsg() (Renga's libnetwork) is used as on Linux and the BSDs.
 - components/named_mojo_ipc_server/connection_info.h: Haiku has no
   <sys/ucred.h>; struct ucred comes from Renga's <sys/socket.h>.
@@ -17,8 +16,8 @@ Subject: [PATCH] net: Haiku socket options, errno values and peer credentials
 - dns/address_sorter_posix.cc: the BSD path reads IPv6 address flags
   with the SIOCGIFAFLAG_IN6 ioctl, which Haiku does not have; Haiku takes
   the generic path.
-- third_party/webrtc/rtc_base/physical_socket_server.cc: same
-  SO_TIMESTAMP fallback as UDPSocketPosix.
+- third_party/webrtc: no changes needed on Renga (SO_TIMESTAMP and the
+  IPv6 traffic-class options exist).
 
 QUIC: Renga accepts sendmsg() with control messages on UDP sockets and
 provides the ECN and packet-info options QUIC uses, so this branch no
@@ -269,61 +268,21 @@ index 80b35bb..fea29f4 100644
    // Socket for ioctl.
    int ioctl_socket = socket(AF_INET6, SOCK_DGRAM, 0);
 diff --git a/net/socket/udp_socket_posix.cc b/net/socket/udp_socket_posix.cc
-index 4eb2d73..8621952 100644
+index 4eb2d73..edd515f 100644
 --- a/net/socket/udp_socket_posix.cc
 +++ b/net/socket/udp_socket_posix.cc
-@@ -84,6 +84,31 @@
+@@ -84,6 +84,14 @@
  #define CMSG_ALIGN(n) _ALIGN(n)
  #endif
  
 +#if defined(__HAIKU__)
-+// Renga has no SO_TIMESTAMP yet (RENGA-REQUESTS.md R-4). An unknown option
-+// number makes the setsockopt() fail cleanly and the cmsg check never match;
-+// Chromium then falls back to taking the receive time itself.
-+#ifndef SO_TIMESTAMP
-+#define SO_TIMESTAMP (-3)
-+#endif
-+#ifndef SCM_TIMESTAMP
-+#define SCM_TIMESTAMP SO_TIMESTAMP
-+#endif
-+#endif  // __HAIKU__
-+
-+#if defined(__HAIKU__)
-+// Haiku has only struct ip_mreq; this matches Linux's layout, whose leading
-+// part is ip_mreq (group, interface address).
-+struct ip_mreqn {
-+  struct in_addr imr_multiaddr;
-+  struct in_addr imr_address;
-+  int imr_ifindex;
-+};
++// struct ip_mreqn comes from Renga's <netinet/in.h>. IP_DEFAULT_MULTICAST_TTL
++// (Linux's and the BSDs' default of 1) is not defined there.
 +#ifndef IP_DEFAULT_MULTICAST_TTL
 +#define IP_DEFAULT_MULTICAST_TTL 1
 +#endif
 +#endif  // __HAIKU__
 +
  namespace net {
- 
- namespace {
-diff --git a/third_party/webrtc/rtc_base/physical_socket_server.cc b/third_party/webrtc/rtc_base/physical_socket_server.cc
-index c562c33..a2edf30 100644
---- a/third_party/webrtc/rtc_base/physical_socket_server.cc
-+++ b/third_party/webrtc/rtc_base/physical_socket_server.cc
-@@ -93,6 +93,18 @@ typedef char* SockOptArg;
- #endif  // !defined(EPOLLRDHUP)
- #endif  // defined(WEBRTC_LINUX)
- 
-+#if defined(__HAIKU__)
-+// Renga has no SO_TIMESTAMP yet (RENGA-REQUESTS.md R-4). An unknown option
-+// number makes the setsockopt() fail cleanly and the cmsg check never match;
-+// Chromium then falls back to taking the receive time itself.
-+#ifndef SO_TIMESTAMP
-+#define SO_TIMESTAMP (-3)
-+#endif
-+#ifndef SCM_TIMESTAMP
-+#define SCM_TIMESTAMP SO_TIMESTAMP
-+#endif
-+#endif  // __HAIKU__
-+
- namespace webrtc {
  
  namespace {

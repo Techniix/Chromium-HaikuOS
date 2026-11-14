@@ -96,12 +96,15 @@ if [ -n "${PYTHON:-}" ]; then
 fi
 
 echo "Libraries (pkg-config):"
-for m in wayland-client wayland-cursor wayland-egl xkbcommon glib-2.0 nss nspr expat; do
+# Renga: Wayland comes from the renga_wayland package (socket transport),
+# found under its own names; libwayland-cursor and -egl are built from
+# Chromium's sources (third_party/wayland), so they are not checked.
+for m in wayland-client-renga wayland-server-renga xkbcommon glib-2.0 nss nspr expat; do
   if [ -n "${PKG_CONFIG:-}" ] && "$PKG_CONFIG" --exists "$m" 2>/dev/null; then
     printf '  %-20s %s\n' "$m" "$("$PKG_CONFIG" --modversion "$m")"
   else
     case $m in
-      wayland-*) pkg=devel:libwayland_client ;;
+      wayland-*-renga) pkg="devel:lib${m//-/_}  (package renga_wayland, part of every x86_64 Renga image)" ;;
       xkbcommon) pkg=devel:libxkbcommon ;;
       glib-2.0)  pkg=devel:libglib_2.0 ;;
       nss)       pkg=devel:libnss3 ;;

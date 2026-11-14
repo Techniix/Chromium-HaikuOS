@@ -11,9 +11,11 @@
 # Usage:
 #   scripts/renga-tests.sh probe          Renga interfaces, as Chromium calls them
 #   scripts/renga-tests.sh quic OUT_DIR   HTTP/3 with and without --disable-quic
+#   scripts/renga-tests.sh wayland OUT_DIR  open a window on Renga's compositor
+#                                         and check which libwayland is loaded
 #   scripts/renga-tests.sh v8 OUT_DIR     run Chromium, capture and symbolize
 #                                         the next renderer crash
-#   scripts/renga-tests.sh all OUT_DIR    probe, quic, then v8
+#   scripts/renga-tests.sh all OUT_DIR    probe, quic, wayland, then v8
 #
 # Environment:
 #   QUIC_URL   page served over HTTP/3 (default https://cloudflare-quic.com/)
@@ -63,12 +65,12 @@ cmd_probe() {
       -o "$bin" "$HERE/tools/renga-probe.c" -lgnu -lbsd -lnetwork || return 1
   { environment; echo; "$bin"; } 2>&1 | tee "$out"
   # R-3: can the frames backtrace_symbols_fd() printed be resolved?
-  echo "---- symbolized with tools/symbolize-trace.py (--base text)" | tee -a "$out"
+  echo "---- symbolized with tools/symbolize-trace.py (--base image, default)" | tee -a "$out"
   sed -n '/^---- backtrace_symbols_fd/,/^----$/p' "$out" | sed '1d;$d' |
     python3 "$HERE/tools/symbolize-trace.py" --dir "$RESULTS" 2>&1 | tee -a "$out"
-  echo "---- symbolized with --base image" | tee -a "$out"
+  echo "---- symbolized with --base text (images before 2026.11.14-chromium-wayland)" | tee -a "$out"
   sed -n '/^---- backtrace_symbols_fd/,/^----$/p' "$out" | sed '1d;$d' |
-    python3 "$HERE/tools/symbolize-trace.py" --dir "$RESULTS" --base image 2>&1 |
+    python3 "$HERE/tools/symbolize-trace.py" --dir "$RESULTS" --base text 2>&1 |
     tee -a "$out"
   echo "Expected: frame 0 is static_frame, frame 1 exported_frame, then main."
   echo "Saved $out"
@@ -148,6 +150,38 @@ PY
   echo "Saved $out (the NetLogs open in https://netlog-viewer.appspot.com/)"
 }
 
+# Opens a browser window for 20 seconds through Renga's compositor and checks
+# that the browser process loaded Renga's socket libwayland and not
+# HaikuPorts' in-process one (the two must never share a process). Asks you
+# to confirm the window has Renga's frame (xdg-decoration, no KDE protocol).
+cmd_wayland() {
+  chrome_bin "${1:-}"
+  local out=$RESULTS/wayland-$STAMP
+  mkdir -p "$out"
+  environment > "$out/summary.txt"
+  "$HERE/scripts/run-chromium.sh" "$(dirname "$CHROME")" \
+      --enable-logging=stderr --v=0 --user-data-dir="$out/profile" \
+      about:blank 2> "$out/chrome.stderr.txt" &
+  local team=$!
+  sleep 20
+  listimage "$team" > "$out/images.txt" 2>&1
+  kill "$team" 2>/dev/null; wait "$team" 2>/dev/null
+  {
+    echo "libwayland images in the browser process:"
+    grep -i 'wayland' "$out/images.txt" | sed 's/^/  /' || echo "  (none)"
+    if grep -q 'libwayland-client-renga' "$out/images.txt" &&
+       ! grep -E 'libwayland-client\.so|wayland_server' "$out/images.txt" >/dev/null; then
+      echo "PASS only Renga's socket libwayland is loaded"
+    else
+      echo "FAIL expected libwayland-client-renga.so.0 and no HaikuPorts libwayland"
+    fi
+    grep -iE 'wayland|decoration|Failed to' "$out/chrome.stderr.txt" | head -20 |
+      sed 's/^/  stderr: /'
+  } | tee -a "$out/summary.txt"
+  echo "Did the window have Renga's own title tab and borders? Note it in"
+  echo "$out/summary.txt. Saved $out"
+}
+
 # Starts Chromium with stderr captured, waits until a renderer crashes (or
 # the browser exits), then symbolizes the trace.
 cmd_v8() {
@@ -176,7 +210,8 @@ cmd_v8() {
 case "${1:-}" in
   probe) cmd_probe ;;
   quic)  cmd_quic "${2:-}" ;;
+  wayland) cmd_wayland "${2:-}" ;;
   v8)    cmd_v8 "${2:-}" ;;
-  all)   cmd_probe; cmd_quic "${2:-}"; cmd_v8 "${2:-}" ;;
-  *) sed -n '2,25p' "$0"; exit 2 ;;
+  all)   cmd_probe; cmd_quic "${2:-}"; cmd_wayland "${2:-}"; cmd_v8 "${2:-}" ;;
+  *) sed -n '2,27p' "$0"; exit 2 ;;
 esac

@@ -29,7 +29,13 @@ export CC=$CLANG CXX=$CLANGXX AR=$LLVM_AR NM=${LLVM_AR%-ar}-nm
 export RUSTC_BOOTSTRAP=1
 # Stub pkg-config entries for libraries Haiku lacks that GN only queries
 # (atspi-2, dri, gbm); see prebuilt/pkgconfig.
-export PKG_CONFIG_PATH="$HERE/prebuilt/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+# Renga: /boot/system/data/renga_wayland/pkgconfig has wayland-client.pc and
+# wayland-server.pc for Renga's socket-transport libwayland (package
+# renga_wayland). It goes first, so Chromium's pkg-config lookups of
+# "wayland-client"/"wayland-server" find it rather than HaikuPorts'
+# in-process libwayland, which must not end up in the same process.
+RENGA_WAYLAND_PC=/boot/system/data/renga_wayland/pkgconfig
+export PKG_CONFIG_PATH="$RENGA_WAYLAND_PC:$HERE/prebuilt/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
 cd "$SRC"
 mkdir -p "$OUT"
@@ -71,6 +77,11 @@ for h in sys/epoll.h sys/eventfd.h sys/inotify.h execinfo.h; do
 done
 grep -q memfd_create "$GNU_HEADERS/sys/mman.h" 2>/dev/null || {
   echo "This Renga image has no memfd_create(); update it (see docs/RENGA.md)." >&2
+  exit 1; }
+[ -f /boot/system/data/renga_wayland/pkgconfig/wayland-client.pc ] || {
+  echo "Package renga_wayland is missing: update to the Renga image" >&2
+  echo "2026.11.14-chromium-wayland or later. This branch no longer builds" >&2
+  echo "against HaikuPorts' in-process libwayland." >&2
   exit 1; }
 
 # --- Haiku helper library -----------------------------------------------------

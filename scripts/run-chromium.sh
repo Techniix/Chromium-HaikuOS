@@ -15,11 +15,27 @@ OUT=$(cd "$OUT" && pwd)
 # Haiku's runtime loader searches LIBRARY_PATH (not LD_LIBRARY_PATH).
 export LIBRARY_PATH="$OUT${LIBRARY_PATH:+:$LIBRARY_PATH}"
 
+# Renga: windows go to Renga's Wayland compositor through its socket,
+# $XDG_RUNTIME_DIR/${WAYLAND_DISPLAY:-wayland-0}. Renga sets XDG_RUNTIME_DIR
+# at login; the compositor runs while Screen preferences > "Show Wayland
+# programs" is on.
+: "${XDG_RUNTIME_DIR:=/tmp/xdg-runtime}"
+export XDG_RUNTIME_DIR
+WL_SOCKET=$XDG_RUNTIME_DIR/${WAYLAND_DISPLAY:-wayland-0}
+if [ ! -S "$WL_SOCKET" ]; then
+  echo "No Wayland compositor socket at $WL_SOCKET." >&2
+  echo "Turn on Screen preferences > \"Show Wayland programs\" (or run" >&2
+  echo "'Screen --wayland on') and try again." >&2
+  exit 1
+fi
+
 PROFILE=$HOME/config/settings/Chromium-dev
 FIRST_RUN=()
-# Chromium sizes its first window to the screen, but the Haiku window frame
-# (tab and borders) is drawn outside that size, so the bottom-right corner
-# ends up off screen. Give a new profile a size that fits; later runs use
+# Chromium sizes its first window to the screen, but the window frame (tab
+# and borders) is drawn outside that size, so the bottom-right corner ends up
+# off screen. Renga's compositor now sends xdg_toplevel.configure_bounds,
+# but Chromium 156 ignores it (XdgToplevel::OnConfigureBounds is
+# NOTIMPLEMENTED), so give a new profile a size that fits; later runs use
 # the size Chromium remembers.
 [ -f "$PROFILE/Default/Preferences" ] || FIRST_RUN=(--window-size=1280,800 --window-position=40,40)
 
