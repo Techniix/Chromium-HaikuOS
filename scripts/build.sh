@@ -9,6 +9,12 @@
 # Environment:
 #   JOBS=N            ninja parallelism (default: CPU count)
 #   EXTRA_GN_ARGS=..  appended to the generated args.gn
+#   LOG_DIR=DIR       where build logs go (default: logs/ in this repository)
+#
+# Every run writes logs/build-YYYYMMDD-HHMMSS.log (everything gn and ninja
+# printed) and, if it fails, logs/build-YYYYMMDD-HHMMSS-failures.txt with just
+# the failing steps and their error output: that is the file to send when
+# asking for help. logs/build-latest*.txt point at the newest ones.
 
 set -euo pipefail
 
@@ -21,6 +27,65 @@ TARGETS=("$@")
 [ ${#TARGETS[@]} -gt 0 ] || TARGETS=(chrome)
 
 [ -f "$SRC/.haiku-prepared" ] || { echo "Run scripts/prepare-tree.sh $SRC first." >&2; exit 1; }
+
+# --- logs --------------------------------------------------------------------
+LOG_DIR=${LOG_DIR:-$HERE/logs}
+mkdir -p "$LOG_DIR"
+LOG_DIR=$(cd "$LOG_DIR" && pwd)
+LOG_STAMP=$(date +%Y%m%d-%H%M%S)
+LOG=$LOG_DIR/build-$LOG_STAMP.log
+FAILURES=$LOG_DIR/build-$LOG_STAMP-failures.txt
+{
+  echo "# build.sh $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "# port: $(git -C "$HERE" rev-parse --abbrev-ref HEAD 2>/dev/null) $(git -C "$HERE" rev-parse --short HEAD 2>/dev/null)"
+  echo "# system: $(uname -a)"
+  echo "# source: $SRC ($(cat "$SRC/.haiku-prepared"))"
+  echo "# out: $OUT, targets: ${TARGETS[*]}, JOBS=${JOBS:-auto}, EXTRA_GN_ARGS=${EXTRA_GN_ARGS:-}"
+} > "$LOG"
+ln -sf "$(basename "$LOG")" "$LOG_DIR/build-latest.log"
+
+# Pull the failing steps out of a ninja log: from each "FAILED:" line up to the
+# next progress line ("[123/456] ...") or ninja's closing message.
+extract_failures() {
+  awk '
+    /^FAILED: /                    { on = 1; n++; print "======== failure " n; print; next }
+    on && /^\[[0-9]+\/[0-9]+\] /    { on = 0; print ""; next }
+    on && /^ninja: build stopped/  { on = 0; print ""; next }
+    on                             { print }
+    /^ninja: error/                { print "========"; print }
+  ' "$1"
+}
+
+# Run a build step with its output going to the terminal and the log; on
+# failure, write the failures file and stop.
+logged() { # step-name command...
+  local step=$1; shift
+  set +e
+  "$@" 2>&1 | tee -a "$LOG"
+  local rc=${PIPESTATUS[0]}
+  set -e
+  [ "$rc" -eq 0 ] && return 0
+  {
+    head -5 "$LOG"
+    echo "# failed step: $step (exit $rc)"
+    echo
+    if [ "$step" = ninja ]; then
+      extract_failures "$LOG"
+    else
+      sed -n '6,$p' "$LOG" | tail -n 200
+    fi
+    if grep -qE 'Return code is -11|code=139|code=245|Segmentation fault' "$LOG"; then
+      echo
+      echo "# A tool crashed (SIGSEGV). Run the failing command by hand from"
+      echo "# $SRC/$OUT to get Haiku's crash report (Debugger > Save report)."
+    fi
+  } > "$FAILURES"
+  ln -sf "$(basename "$FAILURES")" "$LOG_DIR/build-latest-failures.txt"
+  echo
+  echo "Build failed in $step. Send this file: $FAILURES" >&2
+  echo "Full log: $LOG" >&2
+  exit "$rc"
+}
 
 . "$HERE/scripts/detect-toolchain.sh"
 
@@ -112,13 +177,14 @@ if [ ! -f "$OUT/gen/src/tint/lang/core/enums.cc" ]; then
   tar -xzf "$HERE/prebuilt/tint-gen.tar.gz" -C "$OUT/gen"
 fi
 
-echo "==> gn gen $OUT"
-"$OUT/gn" gen "$OUT"
+echo "==> gn gen $OUT" | tee -a "$LOG"
+logged "gn gen" "$OUT/gn" gen "$OUT"
 
 # --- ninja -------------------------------------------------------------------
 JOBS=${JOBS:-$(nproc 2>/dev/null || sysinfo -cpu 2>/dev/null | grep -c '^CPU #' || echo 2)}
-echo "==> ninja -j$JOBS ${TARGETS[*]}"
-ninja -C "$OUT" -j"$JOBS" "${TARGETS[@]}"
+echo "==> ninja -j$JOBS ${TARGETS[*]}" | tee -a "$LOG"
+logged ninja ninja -C "$OUT" -j"$JOBS" "${TARGETS[@]}"
+rm -f "$LOG_DIR/build-latest-failures.txt"
 
 echo
 echo "Built $SRC/$OUT/chrome"
