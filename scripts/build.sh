@@ -144,8 +144,8 @@ grep -q memfd_create "$GNU_HEADERS/sys/mman.h" 2>/dev/null || {
   echo "This Renga image has no memfd_create(); update it (see docs/RENGA.md)." >&2
   exit 1; }
 [ -f /boot/system/data/renga_wayland/pkgconfig/wayland-client.pc ] || {
-  echo "Package renga_wayland is missing: update to the Renga image" >&2
-  echo "2026.11.14-chromium-wayland or later. This branch no longer builds" >&2
+  echo "Package renga_wayland is missing: use the Renga image" >&2
+  echo "2026.11.15-chromium-readiness or later. This branch no longer builds" >&2
   echo "against HaikuPorts' in-process libwayland." >&2
   exit 1; }
 

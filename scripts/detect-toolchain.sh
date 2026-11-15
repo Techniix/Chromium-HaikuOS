@@ -136,4 +136,5 @@ if [ ${#_missing[@]} -gt 0 ]; then
     echo "Install the missing tools and try again." >&2
     return 1 2>/dev/null || exit 1
   fi
+  exit 1
 fi

@@ -14,26 +14,35 @@ Renga answers in `docs/partners/CHROMIUM.md` there.
 
 ## Building and testing
 
-Use a Renga image from
-[Techniix/renga-builds](https://github.com/Techniix/renga-builds), at least
-`renga-2026.11.14-chromium-wayland`: the branch needs its `renga_wayland`
-package (Renga's socket-transport libwayland) and the compositor that comes
-with it. Install the same packages as for stock Haiku (README), except that
-`wayland_server` is not needed; HaikuPorts' `wayland` packages may stay
-installed, because `scripts/build.sh` points pkg-config at Renga's library
-first. Keep Screen preferences > "Show Wayland programs" on (the default).
-Then, on Renga:
+Use the Renga image `renga-2026.11.15-chromium-readiness` (`143b8c30`) from
+[Techniix/renga-builds](https://github.com/Techniix/renga-builds), or a later
+one that Renga's `docs/partners/CHROMIUM.md` recommends for builds. Renga
+checked this image for the build: Node with large heaps and worker threads,
+Python, gn, ninja, clang with lld, and `scripts/renga-tests.sh probe`. It
+also has the fixes for R-7 (`wl_fixes` 2) and R-8 (lld-linked programs
+branded GNU stay native), so the local workarounds used on earlier images
+are not needed. Keep Screen preferences > "Show Wayland programs" on (the
+default). Then, on Renga:
 
 ```sh
+git clone https://github.com/Techniix/Chromium-HaikuOS.git
+cd Chromium-HaikuOS
 git checkout renga
+scripts/setup-renga.sh --save /path/to/saved-packages
 scripts/fetch-sources.sh
 scripts/prepare-tree.sh work/chromium-156.0.8078.79
-scripts/build.sh work/chromium-156.0.8078.79
-scripts/renga-tests.sh probe
+JOBS=10 scripts/build.sh work/chromium-156.0.8078.79
 scripts/renga-tests.sh quic    work/chromium-156.0.8078.79/out/Release
 scripts/renga-tests.sh wayland work/chromium-156.0.8078.79/out/Release
 scripts/renga-tests.sh v8      work/chromium-156.0.8078.79/out/Release
 ```
+
+`scripts/setup-renga.sh` installs the build packages, the npm tools
+(`esbuild-wasm`, `typescript@6`) and the libclang Python bindings, then
+runs `detect-toolchain.sh` and the probe. With `--save DIR` it copies the
+installed packages to `DIR`; on the next fresh install, `--from DIR`
+installs those first, so little has to be downloaded again. It can be run
+again at any time and only installs what is missing.
 
 `scripts/build.sh` stops early on a system without Renga's headers or the
 `renga_wayland` package. A tree prepared from `main`, or from this branch

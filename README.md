@@ -12,7 +12,9 @@ HTTP/3; [`docs/PORTING.md`](docs/PORTING.md) lists the known limitations.
 
 A second target, Renga (a Haiku-based operating system that adds the Linux
 and BSD interfaces Chromium uses), is developed on the `renga` branch.
-**This is the `renga` branch:** it builds only on Renga. See
+**This is the `renga` branch:** it builds only on Renga. On a fresh Renga
+install, `scripts/setup-renga.sh` installs everything the build needs; the
+package list below is for stock Haiku. See
 [docs/RENGA.md](docs/RENGA.md) for what differs from stock Haiku, how to
 test, and the change log, and [RENGA-REQUESTS.md](RENGA-REQUESTS.md) for
 what the port has asked Renga for.
