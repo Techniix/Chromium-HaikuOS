@@ -16,12 +16,20 @@ R-1, R-2, R-4 and R-6 on the running system.
 Urgency: **high** blocks a phase B item; **medium** costs performance or
 noise in normal use; **low** is correctness at the edges or a later phase.
 
-Last updated: 2026-11-14 (landed batch). Port commit: see `git log -- RENGA-REQUESTS.md`.
+Last updated: 2026-11-15. Port commit: see `git log -- RENGA-REQUESTS.md`.
 
 ## Open
 
 ### R-8: Renguin claims native Haiku executables whose EI_OSABI is GNU
 
+- **Status:** landed 2026-11-15 (`b2484110`), in image
+  `2026.11.15-chromium-readiness` (`143b8c30`). Renguin takes `EI_OSABI` 3
+  as a Linux brand only for programs without `PT_INTERP` and without
+  `DT_NEEDED`; faults of Linux threads now reach an attached debugger and
+  are logged. Renga's runtime_loader also applies `R_X86_64_IRELATIVE`
+  (IFUNCs within one image; not yet IFUNC symbols referenced from another
+  image). Port: no change; the local byte-7 reset is not needed on that
+  image. Not yet tested in the port.
 - **Urgency:** high (stops the Chromium build; will also stop `chrome`).
 - **What happens:** V8's `mksnapshot`, a native Haiku executable built by
   this port (`ET_DYN`, linked with `-shared` like every Haiku program, no
@@ -68,7 +76,8 @@ Last updated: 2026-11-14 (landed batch). Port commit: see `git log -- RENGA-REQU
   update renga_wayland`, no system update needed). Headers and interface
   tables have `wl_fixes` 2; the compositor offers version 2 from the next
   image. Port: drop the local `#ifdef` once the package is installed; not
-  yet tested.
+  yet tested. The compositor side (advertising version 2) is in image
+  `2026.11.15-chromium-readiness` (`143b8c30`).
 - **Urgency:** high (stops the Chromium build).
 - **Need:** `renga_wayland`'s core protocol, both the generated
   `wayland-client-protocol.h` and the `wl_fixes_interface` table compiled
