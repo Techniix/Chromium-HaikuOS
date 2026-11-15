@@ -18,6 +18,44 @@ noise in normal use; **low** is correctness at the edges or a later phase.
 
 Last updated: 2026-11-14 (landed batch). Port commit: see `git log -- RENGA-REQUESTS.md`.
 
+## Open
+
+### R-7: wl_fixes version 2 in renga_wayland's core protocol
+
+- **Urgency:** high (stops the Chromium build).
+- **Need:** `renga_wayland`'s core protocol, both the generated
+  `wayland-client-protocol.h` and the `wl_fixes_interface` table compiled
+  into `libwayland-client-renga`, at `wl_fixes` version 2, which adds the
+  request `ack_global_remove(registry: object wl_registry, name: uint)`
+  (opcode 2, since 2) and the `invalid_ack_remove` error.
+- **Why:** Chromium 156 builds against the system libwayland's headers.
+  `ui/ozone/platform/wayland/host/wayland_connection.cc` binds `wl_fixes` up
+  to version 2 and, in its `wl_registry.global_remove` handler, calls
+  `wl_fixes_ack_global_remove()` when the bound version is at least
+  `WL_FIXES_ACK_GLOBAL_REMOVE_SINCE_VERSION`. Renga's headers are generated
+  from Wayland 1.24's `wayland.xml`, where `wl_fixes` is version 1, so
+  neither name exists and the file does not compile:
+  `error: use of undeclared identifier 'WL_FIXES_ACK_GLOBAL_REMOVE_SINCE_VERSION'`
+  (first Renga build, `ea9753b2`, real hardware).
+- **Exact behaviour asked for:** generate the headers and the interface
+  tables from a `wayland.xml` with `wl_fixes` version 2 (the one bundled in
+  Chromium 156, `third_party/wayland/src/protocol/wayland.xml`, has it).
+  The compositor may keep advertising version 1: Chromium sends the request
+  only when it bound version 2. If the compositor offers version 2, it must
+  accept the acknowledgement of a removed global, and it may then destroy
+  the global for good once every client bound to `wl_fixes` 2 has
+  acknowledged it.
+- **Only this is used:** comparing Chromium's bundled `wayland.xml` with
+  Renga's, Chromium's protocol is newer in several places (`wl_compositor`
+  7, `wl_surface` 7, `wl_seat` 11, `wl_data_device_manager` 4, new
+  `wl_shm` formats), but Chromium 156 binds `wl_compositor` up to 4,
+  `wl_seat` up to 10 and `wl_data_device_manager` up to 3 and uses none of
+  the newer names; `wl_fixes` 2 is the only one it needs.
+- **Port meanwhile:** nothing is committed. To keep a local build going,
+  wrap that one call in
+  `#ifdef WL_FIXES_ACK_GLOBAL_REMOVE_SINCE_VERSION` in the source tree; it
+  then compiles the call again by itself once Renga's headers have it.
+
 ## Landed in Renga, not yet tested in the port
 
 Renga accepted R-1 to R-6 on 2026-11-14 and landed them the same day in
