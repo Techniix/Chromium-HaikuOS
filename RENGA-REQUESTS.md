@@ -20,6 +20,47 @@ Last updated: 2026-11-14 (landed batch). Port commit: see `git log -- RENGA-REQU
 
 ## Open
 
+### R-8: Renguin claims native Haiku executables whose EI_OSABI is GNU
+
+- **Urgency:** high (stops the Chromium build; will also stop `chrome`).
+- **What happens:** V8's `mksnapshot`, a native Haiku executable built by
+  this port (`ET_DYN`, linked with `-shared` like every Haiku program, no
+  `PT_INTERP`, `PT_DYNAMIC` with `DT_NEEDED` `libroot.so`, `libgnu.so`,
+  `libbsd.so`, `libnetwork.so`, `libgcc_s.so.1`), dies with SIGSEGV before
+  any of its code runs, even for `./mksnapshot --help` (Renga `ea9753b2`,
+  real hardware). Its ELF header has `EI_OSABI` 3 (`ELFOSABI_GNU`/Linux):
+  lld brands the output GNU when an input object uses GNU extensions such
+  as IFUNC symbols. `renguin_probe()` (`personalities/renguin/loader.cpp`,
+  check 2) claims every executable with that byte as a Linux program, so
+  Renguin loads this Haiku program with the Linux personality.
+- **Evidence:** the SIGSEGV has `si_addr` NULL, `si_errno` `EFAULT`
+  (0x80001301) and the team itself as sender; `strace` shows no system
+  call before it (native programs show the runtime loader's calls from
+  `image_relocated` on); a preloaded library's constructor never runs; the
+  graphical Debugger, attached from the start, is never told about a fault
+  and only reports that the team terminated (the page-fault path in
+  `vm.cpp` sends foreign-ABI threads the signal through
+  `foreign_personality_fault_signal()` without notifying the user
+  debugger); nothing is logged. `torque`, a smaller V8 tool from the same
+  build with `EI_OSABI` 0, runs normally. On stock Haiku, where nothing
+  reads `EI_OSABI`, the same `mksnapshot` ran.
+- **Exact behaviour asked for:** do not take `EI_OSABI` 3 alone as proof
+  of Linux for a dynamically linked executable without a Linux
+  interpreter. The comment on check 2 names glibc's *static* programs with
+  IFUNCs; restricting it to executables without `PT_DYNAMIC` (or to those
+  with a Linux `PT_INTERP`, or excluding any whose `DT_NEEDED` list names
+  `libroot.so`) would keep that case and leave Haiku programs alone. Native
+  executables with GNU extensions are normal output of lld and GCC on Haiku.
+- **Repro:** any Haiku program built with clang and lld that contains an
+  IFUNC (for example `__attribute__((ifunc("resolver")))`), or an existing
+  executable with byte 7 of its ELF header set to 3:
+  `printf '\003' | dd of=prog bs=1 seek=7 conv=notrunc` on a copy of any
+  native program, then run it.
+- **Port meanwhile:** nothing is committed. To keep a local build going,
+  byte 7 of the affected executables in `out/Release` can be reset to 0
+  (Haiku's runtime_loader does not read it); this has to be repeated after
+  each relink.
+
 ### R-7: wl_fixes version 2 in renga_wayland's core protocol
 
 - **Status:** landed 2026-11-14 (`c855b4b3`; package `renga_wayland`
