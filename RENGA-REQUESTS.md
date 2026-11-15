@@ -22,6 +22,12 @@ Last updated: 2026-11-14 (landed batch). Port commit: see `git log -- RENGA-REQU
 
 ### R-7: wl_fixes version 2 in renga_wayland's core protocol
 
+- **Status:** landed 2026-11-14 (`c855b4b3`; package `renga_wayland`
+  `r1~beta6_hrev60381_305-1` in RengaPorts, `pkgman refresh && pkgman
+  update renga_wayland`, no system update needed). Headers and interface
+  tables have `wl_fixes` 2; the compositor offers version 2 from the next
+  image. Port: drop the local `#ifdef` once the package is installed; not
+  yet tested.
 - **Urgency:** high (stops the Chromium build).
 - **Need:** `renga_wayland`'s core protocol, both the generated
   `wayland-client-protocol.h` and the `wl_fixes_interface` table compiled
