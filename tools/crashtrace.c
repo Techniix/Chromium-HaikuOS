@@ -18,17 +18,24 @@
  * still dies the way it would have. Frames print as image(symbol+0xoff) or
  * image(+0xoff); tools/symbolize-trace.py resolves them.
  *
- * If the program installs its own handler for one of these signals later,
- * that handler wins: crashtrace only sees crashes the program does not
- * handle itself. The alternate stack is set up for the main thread only;
- * other threads run the handler on their own stacks.
+ * crashtrace also interposes sigaction() and signal(): when the program
+ * tries to install its own handler for one of these signals, crashtrace
+ * reports it on stderr and keeps its own handler, unless CRASHTRACE_ALLOW=1
+ * is set (then the program's handler is installed and crashtrace no longer
+ * sees that signal). It prints one line when it is loaded, so a missing
+ * trace can be told apart from a library that was never loaded.
+ *
+ * The alternate stack is set up for the main thread only; other threads run
+ * the handler on their own stacks.
  */
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
 
+#include <dlfcn.h>
 #include <execinfo.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
@@ -45,6 +52,17 @@
 #endif
 
 static int g_log_fd = -1;
+static int g_allow_program_handlers = 0;
+static int (*g_real_sigaction)(int, const struct sigaction*,
+                               struct sigaction*) = NULL;
+
+static int real_sigaction(int sig, const struct sigaction* act,
+                          struct sigaction* old);
+
+static int is_fatal(int sig) {
+  return sig == SIGSEGV || sig == SIGBUS || sig == SIGILL || sig == SIGFPE ||
+         sig == SIGTRAP || sig == SIGABRT;
+}
 
 static void put(int fd, const char* s) {
   if (fd < 0) return;
@@ -148,14 +166,76 @@ static void handler(int sig, siginfo_t* info, void* ctx) {
   if (g_log_fd >= 0) backtrace_symbols_fd(frames, n, g_log_fd);
   put_both("==== end of crashtrace\n");
 
-  signal(sig, SIG_DFL);
+  struct sigaction dfl;
+  memset(&dfl, 0, sizeof(dfl));
+  dfl.sa_handler = SIG_DFL;
+  sigemptyset(&dfl.sa_mask);
+  real_sigaction(sig, &dfl, NULL);
   raise(sig);
+}
+
+static int real_sigaction(int sig, const struct sigaction* act,
+                          struct sigaction* old) {
+  if (!g_real_sigaction)
+    g_real_sigaction = (int (*)(int, const struct sigaction*,
+                                struct sigaction*))dlsym(RTLD_NEXT, "sigaction");
+  if (!g_real_sigaction) {
+    errno = ENOSYS;
+    return -1;
+  }
+  return g_real_sigaction(sig, act, old);
+}
+
+static void report_handler_attempt(int sig) {
+  char buf[32];
+  put_both("crashtrace: the program installs its own handler for ");
+  put_both(signame(sig));
+  if (g_allow_program_handlers) {
+    put_both("; allowed (CRASHTRACE_ALLOW=1)\n");
+  } else {
+    put_both("; keeping crashtrace's (set CRASHTRACE_ALLOW=1 to let it)\n");
+  }
+  (void)buf;
+}
+
+/* Interposed: the program's calls come here first (LD_PRELOAD). */
+int sigaction(int sig, const struct sigaction* act, struct sigaction* old) {
+  if (act && is_fatal(sig) && act->sa_handler != SIG_DFL) {
+    report_handler_attempt(sig);
+    if (!g_allow_program_handlers) {
+      if (old) real_sigaction(sig, NULL, old);
+      return 0;
+    }
+  }
+  return real_sigaction(sig, act, old);
+}
+
+__sighandler_t signal(int sig, __sighandler_t handler_fn) {
+  struct sigaction sa, old;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = handler_fn;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESTART;
+  if (sigaction(sig, &sa, &old) != 0) return SIG_ERR;
+  return old.sa_handler;
 }
 
 __attribute__((constructor)) static void crashtrace_init(void) {
   const char* log = getenv("CRASHTRACE_LOG");
   if (log && *log)
     g_log_fd = open(log, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+  const char* allow = getenv("CRASHTRACE_ALLOW");
+  g_allow_program_handlers = allow && *allow && *allow != '0';
+  {
+    char buf[32];
+    put_both("crashtrace: loaded into process ");
+    dec(buf, (long)getpid());
+    put_both(buf);
+    put_both(real_sigaction(SIGSEGV, NULL, NULL) == 0
+                 ? "\n"
+                 : " (dlsym(RTLD_NEXT, \"sigaction\") failed: cannot install "
+                   "handlers)\n");
+  }
 
   /* Alternate stack: the crash may be a stack overflow. Leaked on purpose. */
   stack_t ss;
@@ -175,5 +255,5 @@ __attribute__((constructor)) static void crashtrace_init(void) {
   sigemptyset(&sa.sa_mask);
   const int sigs[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP, SIGABRT};
   for (size_t i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++)
-    sigaction(sigs[i], &sa, NULL);
+    real_sigaction(sigs[i], &sa, NULL);
 }

@@ -9,8 +9,12 @@
 # catch a crash.
 #
 # Usage: scripts/crashtrace.sh COMMAND [ARGS...]
+#        scripts/crashtrace.sh --self-test
 #   The trace goes to stderr and to logs/crash-YYYYMMDD-HHMMSS.txt; the
 #   symbolized version to logs/crash-YYYYMMDD-HHMMSS-symbolized.txt.
+#   --self-test runs a small program that crashes on purpose, to check that
+#   preloading and the handler work on this system.
+#   CRASHTRACE_ALLOW=1 lets the program install its own crash handlers.
 
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
@@ -21,6 +25,18 @@ LIB=$HERE/logs/libcrashtrace.so
 if [ ! -f "$LIB" ] || [ "$HERE/tools/crashtrace.c" -nt "$LIB" ]; then
   clang -shared -fPIC -O1 -g -D_GNU_SOURCE -o "$LIB" \
       "$HERE/tools/crashtrace.c" -lgnu || exit 1
+fi
+
+if [ "$1" = --self-test ]; then
+  cat > "$HERE/logs/crashtest.c" <<'C'
+#include <stdio.h>
+__attribute__((noinline)) static void crash_here(volatile int* p) { *p = 1; }
+__attribute__((noinline)) void crashtest_outer(volatile int* p) { crash_here(p); }
+int main(void) { puts("crashtest: about to crash"); crashtest_outer((volatile int*)8); return 0; }
+C
+  clang -O1 -g -o "$HERE/logs/crashtest" "$HERE/logs/crashtest.c" || exit 1
+  set -- "$HERE/logs/crashtest"
+  echo "Expected: a trace whose crashing instruction is crash_here (crashtest.c:2)."
 fi
 
 STAMP=$(date +%Y%m%d-%H%M%S)
@@ -43,9 +59,18 @@ if grep -q '==== crashtrace' "$OUT"; then
       --dir "$PWD" "$OUT" > "${OUT%.txt}-symbolized.txt"
   echo
   echo "Crash trace: ${OUT%.txt}-symbolized.txt (raw: $OUT)"
+elif [ "$rc" -eq 127 ]; then
+  echo
+  echo "The command was not found (exit status 127). Run this from the"
+  echo "directory the program is in, or give its full path."
+elif ! grep -q 'crashtrace: loaded' "$OUT"; then
+  echo
+  echo "crashtrace was not loaded into the program (exit status $rc): this"
+  echo "system did not honour LD_PRELOAD for it. Log: $OUT"
 else
   echo
-  echo "No crash was caught (exit status $rc). If the program crashed anyway,"
-  echo "it handles the signal itself. Log: $OUT"
+  echo "crashtrace was loaded but caught no crash (exit status $rc). If the"
+  echo "program died anyway, it was killed before its signal handler could"
+  echo "run. Log: $OUT"
 fi
 exit $rc
