@@ -10,7 +10,9 @@ Subject: [PATCH] net: Haiku socket options, errno values and peer credentials
   2026.11.14-chromium-wayland), so the stock-Haiku stand-ins are gone, and
   recvmmsg() (Renga's libnetwork) is used as on Linux and the BSDs.
 - components/named_mojo_ipc_server/connection_info.h: Haiku has no
-  <sys/ucred.h>; struct ucred comes from Renga's <sys/socket.h>.
+  <sys/ucred.h>; struct ucred comes from Renga's <sys/socket.h>, which is
+  included in a Haiku branch of its own (IS_LINUX and IS_BSD are both
+  false on Haiku).
   getpeereid() (Renga's libbsd) is used unchanged in
   unix_domain_server_socket_posix.cc.
 - dns/address_sorter_posix.cc: the BSD path reads IPv6 address flags
@@ -24,20 +26,21 @@ provides the ECN and packet-info options QUIC uses, so this branch no
 longer runs with --disable-quic. See docs/RENGA.md for the test result.
 ---
 diff --git a/components/named_mojo_ipc_server/connection_info.h b/components/named_mojo_ipc_server/connection_info.h
-index cefc83a..1934675 100644
+index cefc83a..259c66a 100644
 --- a/components/named_mojo_ipc_server/connection_info.h
 +++ b/components/named_mojo_ipc_server/connection_info.h
-@@ -16,7 +16,9 @@
- #elif BUILDFLAG(IS_MAC)
- #include <bsm/libbsm.h>
+@@ -18,6 +18,10 @@
  #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD)
-+#if !BUILDFLAG(IS_HAIKU)
  #include <sys/ucred.h>
-+#endif
  #include <sys/socket.h>
++#elif BUILDFLAG(IS_HAIKU)
++// Renga declares struct ucred (SO_PEERCRED) in <sys/socket.h>; there is no
++// <sys/ucred.h>. IS_LINUX and IS_BSD are both false on Haiku.
++#include <sys/socket.h>
  #endif
  
-@@ -33,7 +35,7 @@ struct ConnectionInfo {
+ namespace named_mojo_ipc_server {
+@@ -33,7 +37,7 @@ struct ConnectionInfo {
    base::ProcessId pid{};
  #if BUILDFLAG(IS_MAC)
    audit_token_t audit_token{};

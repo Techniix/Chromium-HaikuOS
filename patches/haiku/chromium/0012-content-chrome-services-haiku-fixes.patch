@@ -3,7 +3,8 @@ Subject: [PATCH] content, chrome, services: Haiku fixes for the browser build
 
 - content/browser/BUILD.gn: the File System Access FilePathWatcher uses
   the Linux inotify backend on Haiku (Renga provides inotify); the BSDs
-  keep kqueue. sandbox_ipc_linux.cc stays out on Haiku as on the BSDs.
+  keep kqueue. FilePathWatcher::RecursiveWatchAvailable() is true on Haiku,
+  as on Linux, since the inotify backend implements recursive watches. sandbox_ipc_linux.cc stays out on Haiku as on the BSDs.
 - content/browser/renderer_host/render_process_host_impl.cc: no
   RLIMIT_NPROC; report an unknown process limit.
 - content/services/isolated_xr_device, services/network sandbox hooks,
@@ -94,6 +95,20 @@ index ae1210b..4e79143 100644
        "sandbox_ipc_linux.cc",
        "sandbox_ipc_linux.h",
      ]
+diff --git a/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc b/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc
+index 08a1812..42761c0 100644
+--- a/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc
++++ b/content/browser/file_system_access/file_path_watcher/file_path_watcher.cc
+@@ -59,7 +59,8 @@ FilePathWatcher::~FilePathWatcher() {
+ // static
+ bool FilePathWatcher::RecursiveWatchAvailable() {
+ #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_AIX)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_AIX) || \
++    BUILDFLAG(IS_HAIKU)  // Renga: the Linux inotify watcher
+   return true;
+ #else
+   // FSEvents isn't available on iOS.
 diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
 index e7cb32e..23033f5 100644
 --- a/content/browser/renderer_host/render_process_host_impl.cc

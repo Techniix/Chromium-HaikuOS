@@ -18,6 +18,10 @@ Subject: [PATCH] base: Haiku fixes, memfd shared memory and backtrace() traces
 
 Renga (Techniix/haiku ce/main):
 
+- message_loop/message_pump_epoll.h: kUsePollForMessagePumpEpoll is on
+  by default only for the BSDs (whose epoll is epoll-shim); on Haiku,
+  Renga's native epoll_wait() is used, as on Linux.
+
 - memory/platform_shared_memory_region_posix.cc, .h: use the Linux
   memfd-backed region code (memfd_create() with MFD_ALLOW_SEALING and
   MFD_NOEXEC_SEAL, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL), calling
@@ -285,6 +289,22 @@ index 03c698d..a8e5cf9 100644
  namespace internal {
  #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ANDROID) || (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
  void CheckMemoryReadOnly(const void* ptr) {
+diff --git a/base/message_loop/message_pump_epoll.h b/base/message_loop/message_pump_epoll.h
+index 46b1593..84a947b 100644
+--- a/base/message_loop/message_pump_epoll.h
++++ b/base/message_loop/message_pump_epoll.h
+@@ -48,8 +48,10 @@ namespace base {
+ //
+ // Caveat: Since both we and the kernel need to walk the list of all fds at
+ // every call, don't do it when we have too many FDs.
++// The BSDs default to poll(): their epoll comes from epoll-shim. Renga has a
++// native epoll, so Haiku uses epoll_wait() as Linux does.
+ BASE_FEATURE(kUsePollForMessagePumpEpoll,
+-#if (BUILDFLAG(IS_BSD) || BUILDFLAG(IS_HAIKU))
++#if BUILDFLAG(IS_BSD)
+              base::FEATURE_ENABLED_BY_DEFAULT);
+ #else
+              base::FEATURE_DISABLED_BY_DEFAULT);
 diff --git a/base/posix/can_lower_nice_to.cc b/base/posix/can_lower_nice_to.cc
 index 8979af2..0d9a8f8 100644
 --- a/base/posix/can_lower_nice_to.cc
