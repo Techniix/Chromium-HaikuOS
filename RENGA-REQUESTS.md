@@ -20,6 +20,57 @@ Last updated: 2026-11-15. Port commit: see `git log -- RENGA-REQUESTS.md`.
 
 ## Open
 
+### R-9: wayland_compositor stops on pointer motion over a Chromium window ("Looper must be locked")
+
+- **Urgency:** high (Chromium's first window takes the compositor down
+  within seconds; every Wayland program loses its connection).
+- **What happens:** native Chromium (port commit `5f11bae`, Renga
+  `143b8c30`, real hardware, Ryzen 5 7600X, one 3440x1440 output) opens its
+  first window, "Chromium Additional Terms of Service", draws it, and a
+  moment later, as the mouse moves over the window, the compositor's
+  window thread for that surface calls `debugger("Looper must be locked.")`
+  and the compositor dies. Chromium then logs
+  `Fatal Wayland communication error: Broken pipe`. Reproduced twice in a
+  row (crash reports `app-wayland_compositor-2026-11-19_20-26-07.txt` and
+  `…_20-27-08.txt` in `/boot/system/var/log/crash/`).
+- **Backtrace (both times identical):**
+  ```
+  thread "w>Chromium Additional Terms of" (the surface's BWindow looper)
+    _kern_debugger
+    BView::_CheckOwnerLock() const
+    BView::_ConvertToScreen(BPoint*, bool) const
+    BView::ConvertToScreen(BPoint) const
+    HaikuPointerConstraintsMotion(HaikuSurface*, long, BPoint) + 0x44
+    HaikuSeatGlobal::MessageReceived(HaikuSurface*, BMessage*) + 0x42b
+    WaylandView::MessageReceived(BMessage*) + 0x200
+    BWindow::task_looper()
+  ```
+  `HaikuPointerConstraintsMotion()` converts a point with a view whose
+  looper the calling thread does not hold: most likely a view of another
+  surface's window (or of a surface without a window), since the calling
+  window's own looper is locked while it dispatches the message.
+- **What Chromium had sent:** the client never asked for a pointer lock
+  or confinement. It bound `zwp_pointer_constraints_v1` and
+  `zwp_relative_pointer_manager_v1` (as it always does) but made no
+  `lock_pointer`, `confine_pointer` or `get_relative_pointer` request.
+  It has two surfaces: `wl_surface@28`, created at start-up and never
+  given a role or a buffer, and `wl_surface@29`, the xdg_toplevel
+  (server-side decoration, `wp_viewport` destination 600x508, buffers
+  900x762 at fractional scale 180/120). The last requests before the
+  disconnect were an ordinary frame: `frame`, `attach`, `damage`,
+  `commit`. No protocol error was sent to the client.
+- **Exact behaviour asked for:** pointer motion with no active constraint
+  must not touch any other view; where a conversion to screen coordinates
+  is needed, do it with the view's own looper locked (or from cached
+  window coordinates), and do nothing when the client has no lock or
+  confinement on that surface.
+- **Repro:** run native Chromium (`scripts/run-chromium.sh OUT_DIR`) on a
+  new profile and move the mouse over the first window. A smaller client
+  that binds `zwp_pointer_constraints_v1`, creates an unused
+  `wl_surface` plus an xdg_toplevel with a buffer, then waits for pointer
+  motion, is likely to reproduce it, but that is untested. The full
+  `WAYLAND_DEBUG=1` client log of the run is available on request.
+
 ### R-8: Renguin claims native Haiku executables whose EI_OSABI is GNU
 
 - **Status:** landed 2026-11-15 (`b2484110`), in image
