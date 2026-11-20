@@ -156,7 +156,8 @@ change log), Renga `143b8c30` (`2026.11.15-chromium-readiness`), AMD Ryzen 5
   tool ran natively after R-8.
 - First run: the first window ("Chromium Additional Terms of Service")
   opened on Renga's compositor with server-side decoration and drew; the
-  compositor then stopped on pointer motion over it (R-9). Expected log
+  compositor then stopped on pointer motion over it (R-9, fixed in image
+  `2026.11.20-batch3`). Expected log
   noise: no D-Bus bus (phase D), and NSS's built-in root module not loaded
   (Chromium uses its own root store).
 - HTTP/3 (phase B item 6), `scripts/renga-tests.sh quic`, headless,

@@ -22,6 +22,12 @@ Last updated: 2026-11-15. Port commit: see `git log -- RENGA-REQUESTS.md`.
 
 ### R-9: wayland_compositor stops on pointer motion over a Chromium window ("Looper must be locked")
 
+- **Status:** landed 2026-11-20, in image `2026.11.20-batch3` (the
+  compositor is part of the system package). Motion without a lock,
+  confinement or relative pointer no longer enters the constraints code;
+  conversions happen with the view's looper locked; a harness check
+  reproduces the original stop. Port: no change. Not yet tested in the port.
+
 - **Urgency:** high (Chromium's first window takes the compositor down
   within seconds; every Wayland program loses its connection).
 - **What happens:** native Chromium (port commit `5f11bae`, Renga
@@ -387,6 +393,18 @@ version-compatibility blocks in patch 0010.
   clipboard (`B_MIME_DATA` in `be_clipboard`) should map those.
 
 ### Phase D (D-Bus, portals, notifications, Secret Service)
+
+Status (2026-11-20): Renga runs a D-Bus session bus at login
+(`DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/xdg-runtime/bus`) with
+`org.freedesktop.Notifications`, `org.freedesktop.UPower`,
+`org.freedesktop.portal.Desktop` (Settings, OpenURI) and
+`org.freedesktop.secrets` (asking the user once per program). Not yet:
+FileChooser, Screenshot and ScreenCast portals, and a system bus. The port
+is already built with `use_dbus = true` against HaikuPorts' libdbus, so
+notifications, battery status and the dark-theme setting should work on an
+image with the bus without a port change; `--password-store=basic` stays
+until the libsecret path has been tried. The notes below were written
+before this landed.
 
 - **D-Bus:** the port is built with `use_dbus = true`; Chromium looks for
   the session bus through `DBUS_SESSION_BUS_ADDRESS` and falls back to
