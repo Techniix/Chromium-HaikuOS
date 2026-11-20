@@ -112,6 +112,28 @@ chromium            # or Deskbar > Applications > Chromium
 
 ## Test results
 
+### 2026-11-19: first native build, real hardware
+
+Port commit `5f11bae` (plus the two-file fix applied in place, see the
+change log), Renga `143b8c30` (`2026.11.15-chromium-readiness`), AMD Ryzen 5
+7600X, one 3440x1440 output.
+
+- Build: complete (`chrome` linked). V8's `mksnapshot` and every other build
+  tool ran natively after R-8.
+- First run: the first window ("Chromium Additional Terms of Service")
+  opened on Renga's compositor with server-side decoration and drew; the
+  compositor then stopped on pointer motion over it (R-9). Expected log
+  noise: no D-Bus bus (phase D), and NSS's built-in root module not loaded
+  (Chromium uses its own root store).
+- HTTP/3 (phase B item 6), `scripts/renga-tests.sh quic`, headless,
+  `https://cloudflare-quic.com/`: QUIC handshakes verified and HTTP/3
+  responses received in the second Alt-Svc run (5 responses: 200 and 304)
+  and with QUIC forced (8 responses, all 200); none with `--disable-quic`.
+  Sessions still open at exit close with `ERR_ABORTED`, as when
+  `--dump-dom` ends the process on Linux. The summary printed by that run
+  listed those closes as errors; `renga-tests.sh` now counts HTTP/3
+  responses and leaves shutdown closes out.
+
 ### 2026-11-14: probe, real hardware
 
 `scripts/renga-tests.sh probe` at port commit `0498b85`, on Renga
@@ -143,7 +165,7 @@ Chromium itself has not been built on Renga yet.
 | 3. memfd shared memory | Done; writable regions become memfd-backed with R-1 (landed in Renga 2026-11-14, no port change); not yet run on Renga |
 | 4. Symbolized crash traces through backtrace() | Done; `tools/symbolize-trace.py` defaults to glibc-style offsets (R-3, landed 2026-11-14); not yet run on Renga |
 | 5. Removing emulation | Done; list below |
-| 6. HTTP/3 without --disable-quic | Flag removed; result pending a Renga run |
+| 6. HTTP/3 without --disable-quic | Works (2026-11-19, real hardware): HTTP/3 responses after Alt-Svc and with QUIC forced |
 | 7. V8 "Check failed: success" backtrace | Tooling ready; capture it on `2026.11.14-chromium-wayland` or later (earlier images can drop frames, R-3) |
 | Phase C: Renga's compositor | Built against `renga_wayland`, KDE decoration path removed (2026-11-14); not yet run on Renga |
 

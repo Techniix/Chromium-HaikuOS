@@ -141,9 +141,22 @@ for name in ("altsvc-1", "altsvc-2", "forced", "disabled"):
     quic = seen.get("QUIC_SESSION", 0)
     sent = seen.get("QUIC_SESSION_PACKET_SENT", 0)
     recv = seen.get("QUIC_SESSION_PACKET_RECEIVED", 0)
-    print(f"{name}: QUIC sessions {quic}, packets sent {sent}, received {recv}, "
-          f"protocols {sorted(protos) or '-'}")
-    for e in errors[:10]:
+    # HTTP/3 responses: decoded response headers carrying a :status.
+    h3 = 0
+    for ev in log.get("events", []):
+        if types.get(ev["type"]) == "HTTP3_HEADERS_DECODED":
+            hdrs = (ev.get("params") or {}).get("headers", [])
+            if any(str(h).startswith(":status") for h in hdrs):
+                h3 += 1
+    verified = seen.get("QUIC_SESSION_CERTIFICATE_VERIFIED", 0)
+    print(f"{name}: HTTP/3 responses {h3}; QUIC sessions {quic} "
+          f"({verified} handshakes verified), packets sent {sent}, "
+          f"received {recv}; other protocols {sorted(protos) or '-'}")
+    # Sessions still open when --dump-dom exits are closed with ERR_ABORTED
+    # (-3) / QUIC_CONNECTION_CANCELLED (70); that is shutdown, not a failure.
+    real = [e for e in errors if '"net_error": -3' not in e
+            and '"quic_error": 70' not in e]
+    for e in real[:10]:
         print(f"    {e}")
 PY
   cat "$out/summary.txt"
