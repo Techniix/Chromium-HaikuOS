@@ -74,6 +74,40 @@ in this file and are never reported as hardware results.
 - `v8` starts Chromium with stderr captured, waits for you to reproduce the
   tab crash ("Check failed: success"), and symbolizes the log.
 
+## Continuing development after a fresh install
+
+A built tree can be kept across Renga reinstalls, so a fresh image does not
+mean a full rebuild. Keep this repository, with its `work/` directory, on a
+disk that survives the reinstall, at the same path, and save the build
+packages once with `scripts/setup-renga.sh --save DIR`. On the new install:
+
+```sh
+cd /path/to/Chromium-HaikuOS
+git pull
+scripts/resume-dev.sh --packages /path/to/saved-packages
+JOBS=10 scripts/build.sh work/chromium-156.0.8078.79
+```
+
+`scripts/resume-dev.sh` installs the tools (from the saved packages
+first), checks that the tree has not moved (build files hold absolute
+paths), links the reinstalled tools into the tree again, brings the tree's
+Haiku patches up to the checked-out port commit, and compares the toolchain
+with the one the last build recorded in `out/Release/.renga-build-env`.
+If only Haiku's system headers are newer, it runs
+`tools/skip-sysheader-rebuild.sh` so that only real changes rebuild; if
+clang or rustc changed, it says that most of the tree will rebuild.
+
+The patch update (`tools/update-tree.py`) undoes the old patch version and
+applies the new one for each file whose result differs, and rewrites only
+those files, so ninja rebuilds only what the patch change affects. It
+records the port commit in the tree's `.haiku-port-commit`; trees prepared
+before 2026-11-19 do not have it and need `--from COMMIT` once (the first
+Renga tree: `--from 2191962`). A file fixed by hand in other words than the
+new patch is reported as a conflict; `--accept PATH` leaves it as it is.
+`--dry-run` shows what would change. The same script works without a
+reinstall, after any `git pull` that changes the patches
+(`--skip-setup`).
+
 ## Packaging a build
 
 `scripts/package-hpkg.sh OUT_DIR` turns a finished build into a Haiku

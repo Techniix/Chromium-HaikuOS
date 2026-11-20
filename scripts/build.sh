@@ -186,6 +186,24 @@ echo "==> ninja -j$JOBS ${TARGETS[*]}" | tee -a "$LOG"
 logged ninja ninja -C "$OUT" -j"$JOBS" "${TARGETS[@]}"
 rm -f "$LOG_DIR/build-latest-failures.txt"
 
+# Record what this build was made with. scripts/resume-dev.sh compares it
+# after a fresh Renga install to tell which kind of rebuild to expect.
+pkgver() { ls /boot/system/packages 2>/dev/null | grep -m1 "^$1-" || echo "?"; }
+{
+  echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "src=$SRC"
+  echo "out=$OUT"
+  echo "port=$(git -C "$HERE" rev-parse HEAD 2>/dev/null)"
+  echo "patches=$(cat "$SRC/.haiku-port-commit" 2>/dev/null || echo unknown)"
+  echo "system=$(uname -v)"
+  echo "clang=$("$CLANG" --version | head -1)"
+  echo "rustc=$("$RUSTC" --version)"
+  echo "node=$("$NODE" --version)"
+  echo "haiku_devel=$(pkgver haiku_devel)"
+  echo "llvm=$(pkgver llvm23_clang)"
+  echo "rust=$(pkgver rust_bin)"
+} > "$OUT/.renga-build-env"
+
 echo
 echo "Built $SRC/$OUT/chrome"
 echo "Run it with: $HERE/scripts/run-chromium.sh $SRC/$OUT"

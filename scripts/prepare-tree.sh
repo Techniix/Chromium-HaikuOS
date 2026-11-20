@@ -88,49 +88,15 @@ left=$(grep -rlE '\$\{(LOCALBASE|MODCLANG_VERSION)\}' --include='*.gn' --include
 # --- 5. Tool links -----------------------------------------------------------
 # Chromium looks for these under its own prebuilt directories.
 log "Linking system tools into the tree"
-link() { mkdir -p "$(dirname "$SRC/$2")"; ln -sf "$1" "$SRC/$2"; echo "$2 -> $1"; }
-link "$NODE"   third_party/node/haiku/node-haiku/bin/node
-link "$RUSTC"  third_party/rust-toolchain/bin/rustc
-link "$GPERF"  third_party/gperf/cipd/bin/gperf
-link "$ESBUILD" third_party/devtools-frontend/src/third_party/esbuild/esbuild
-if [ -n "${TSGO:-}" ]; then
-  link "$TSGO" third_party/typescript/linux-amd64/src/lib/tsc
-elif [ -n "${TSC:-}" ]; then
-  # No tsgo (a Go program) on Haiku: run the JavaScript TypeScript compiler
-  # (npm install -g typescript) through a wrapper. Its version differs from the
-  # tsgo pinned by Chromium, so type errors are reported but do not stop the
-  # build; the emitted JavaScript is what matters.
-  w=$SRC/third_party/typescript/linux-amd64/src/lib/tsc
-  mkdir -p "$(dirname "$w")"
-  cat > "$w" <<EOF_TSC
-#!/bin/sh
-# Written by scripts/prepare-tree.sh: tsgo stand-in for Haiku.
-"$TSC" "\$@" --noEmitOnError false
-rc=\$?
-# 1 and 2 mean type errors (output still emitted with --noEmitOnError false);
-# anything else means tsc itself did not run, and the build must stop here
-# rather than fail later on missing JavaScript files.
-case \$rc in
-  0) ;;
-  1|2) echo "tsc wrapper: ignoring type errors (exit \$rc, TypeScript version skew)" >&2 ;;
-  *) echo "tsc wrapper: $TSC failed with exit \$rc" >&2; exit \$rc ;;
-esac
-exit 0
-EOF_TSC
-  chmod +x "$w"
-  echo "third_party/typescript/linux-amd64/src/lib/tsc -> wrapper around $TSC"
-fi
-# FFmpeg picks its generated configuration by OS name; Haiku uses Linux's,
-# as FreeBSD does for itself.
-for brand in Chrome Chromium; do
-  link linux "third_party/ffmpeg/chromium/config/$brand/haiku"
-done
-if [ -n "${CLANG_FORMAT:-}" ]; then
-  link "$CLANG_FORMAT" buildtools/haiku/clang-format
-  link "$CLANG_FORMAT" buildtools/linux64/clang-format
-fi
+. "$HERE/scripts/link-tools.sh"
 
 date -u +"%Y-%m-%dT%H:%M:%SZ by $(basename "$0")" > "$STAMP"
+# The port commit whose Haiku patches this tree has; scripts/resume-dev.sh
+# and tools/update-tree.py bring the tree to newer patches from here.
+git -C "$HERE" rev-parse HEAD > "$SRC/.haiku-port-commit" 2>/dev/null || true
+if [ -n "$(git -C "$HERE" status --porcelain -- patches 2>/dev/null)" ]; then
+  echo "note: patches/ has uncommitted changes; .haiku-port-commit does not include them" >&2
+fi
 
 log "Done"
 echo "Review $SRC/haikuify-report.md, then run: scripts/build.sh $SRC"
